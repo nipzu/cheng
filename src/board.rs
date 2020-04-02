@@ -252,7 +252,6 @@ impl Board {
     }
 
     pub fn make_move(&mut self, coords: (i32, i32, i32, i32)) {
-        self.earlier_moves.push(coords);
         let (x1, y1, x2, y2) = coords;
         // castling
         if x1 == 4
@@ -266,9 +265,11 @@ impl Board {
                 6 => (7, 5),
                 _ => unreachable!(),
             };
-            self.make_move((rx1, y1, rx2, y2));
+            self.set_square(rx2, y2, self.get_square(rx1, y1).unwrap());
+            self.set_square(rx1, y1, Empty);
         }
 
+        self.earlier_moves.push(coords);
         self.set_square(x2, y2, self.get_square(x1, y1).unwrap());
 
         // TODO can only promote to queen
@@ -514,7 +515,7 @@ impl Board {
         }
     }
 
-    fn find_pieces(&self, piece: Square) -> Vec<(i32, i32)> {
+    pub fn find_pieces(&self, piece: Square) -> Vec<(i32, i32)> {
         self.squares
             .iter()
             .flatten()

@@ -3,7 +3,10 @@ use std::io::stdin;
 use rand::{thread_rng, Rng};
 
 mod board;
-use board::*;
+mod engine;
+
+use board::Board;
+use engine::find_best_move;
 
 fn main() {
     handle_uci();
@@ -43,13 +46,14 @@ fn handle_uci() {
             "quit" => return,
             "debug" => {
                 println!("{}", board);
+                println!("draw? {}", board.is_draw());
+                println!("check? {}", board.is_check());
+                println!("checkmate? {}", board.is_checkmate());
                 println!("{:?}", board.get_possible_moves());
             }
             "go" => {
-                let moves = board.get_possible_moves();
-                let best_move = move_to_notation(moves[rng.gen_range(0, moves.len())]);
                 println!("info depth 1");
-                println!("bestmove {}", best_move);
+                println!("bestmove {}", move_to_notation(find_best_move(&board)));
             }
             _ => (), //panic!("unknown command {}", command),
         }
