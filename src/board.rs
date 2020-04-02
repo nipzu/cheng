@@ -1,4 +1,6 @@
+use std::collections::HashMap;
 use std::fmt;
+use std::hash::{Hash, Hasher};
 
 #[derive(Clone)]
 pub struct Board {
@@ -6,7 +8,7 @@ pub struct Board {
     earlier_moves: Vec<(i32, i32, i32, i32)>,
 }
 
-#[derive(PartialEq, Eq, Copy, Clone, Debug)]
+#[derive(PartialEq, Eq, Copy, Clone, Debug, Hash)]
 pub enum Square {
     Empty,
     WhiteKing,
@@ -31,6 +33,50 @@ impl Square {
             WhiteKing | WhiteQueen | WhiteRook | WhiteBishop | WhiteKnight | WhitePawn => true,
             _ => false,
         }
+    }
+}
+
+struct PositionIterator {
+    current_move: usize,
+    current_board: Board,
+    moves: Vec<(i32, i32, i32, i32)>,
+}
+
+impl PositionIterator {
+    pub fn new(moves: Vec<(i32, i32, i32, i32)>) -> PositionIterator {
+        PositionIterator {
+            moves,
+            current_board: Board::new(),
+            current_move: 0,
+        }
+    }
+}
+
+impl Iterator for PositionIterator {
+    type Item = Board;
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.current_move >= self.moves.len() {
+            return None;
+        }
+
+        self.current_board.make_move(self.moves[self.current_move]);
+        self.current_move += 1;
+
+        Some(self.current_board.clone())
+    }
+}
+
+impl Eq for Board {}
+
+impl PartialEq for Board {
+    fn eq(&self, other: &Board) -> bool {
+        self.squares == other.squares
+    }
+}
+
+impl Hash for Board {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.squares.hash(state);
     }
 }
 
@@ -69,6 +115,10 @@ impl Board {
         }
     }
 
+    pub fn get_earlier_positions(&self) -> impl Iterator<Item = Board> {
+        PositionIterator::new(self.earlier_moves.clone())
+    }
+
     pub fn is_checkmate(&self) -> bool {
         self.is_in_check(self.is_white_turn()) && self.get_possible_moves().is_empty()
     }
@@ -77,7 +127,53 @@ impl Board {
         if !self.is_in_check(self.is_white_turn()) && self.get_possible_moves().is_empty() {
             return true;
         }
+        if self.is_insufficient_material()
+            || self.is_threefold_repetition()
+            || self.is_50_move_rule()
+        {
+            return true;
+        }
 
+        false
+    }
+
+    fn is_50_move_rule(&self) -> bool {
+        if self.earlier_moves.len() <= 100 {
+            return false;
+        }
+        for (i, position) in self
+            .get_earlier_positions()
+            .enumerate()
+            .take(self.earlier_moves.len() - 1)
+            .skip(self.earlier_moves.len() - 101)
+        {
+            let (x1, y1, x2, y2) = self.earlier_moves[i];
+
+            if position.get_square(x1, y1) == Some(WhitePawn)
+                || position.get_square(x1, y1) == Some(BlackPawn)
+                || position.get_square(x2, y2) == Some(Empty)
+            {
+                return false;
+            }
+        }
+        false
+    }
+
+    fn is_threefold_repetition(&self) -> bool {
+        let mut previous_positions = HashMap::new();
+
+        for position in self.get_earlier_positions() {
+            if let Some(count) = previous_positions.get_mut(&position) {
+                *count += 1;
+            } else {
+                previous_positions.insert(position, 1);
+            }
+        }
+
+        previous_positions.iter().any(|(_, count)| *count >= 3)
+    }
+
+    fn is_insufficient_material(&self) -> bool {
         if self.find_pieces(WhiteQueen).is_empty()
             && self.find_pieces(BlackQueen).is_empty()
             && self.find_pieces(WhiteRook).is_empty()
@@ -89,12 +185,35 @@ impl Board {
             let black_bishops = self.find_pieces(BlackBishop);
             let white_knights = self.find_pieces(WhiteKnight);
             let black_knights = self.find_pieces(BlackKnight);
+
+            match (
+                white_bishops.len(),
+                black_bishops.len(),
+                white_knights.len(),
+                black_knights.len(),
+            ) {
+                (0, 0, 0, 0) | (1, 0, 0, 0) | (0, 1, 0, 0) | (0, 0, 1, 0) | (0, 0, 0, 1) => {
+                    return true
+                }
+                (1, 1, 0, 0) => {
+                    let wb = white_bishops[0];
+                    let bb = black_bishops[0];
+                    if wb.0 + wb.1 % 2 == bb.0 + bb.1 % 2 {
+                        return true;
+                    }
+                }
+                _ => (),
+            }
         }
 
         false
     }
 
-    pub fn is_in_check(&self, is_white: bool) -> bool {
+    pub fn is_check(&self) -> bool {
+        self.is_in_check(self.is_white_turn())
+    }
+
+    fn is_in_check(&self, is_white: bool) -> bool {
         /*let own_king = if is_white { WhiteKing } else { BlackKing };
                 let own_kings = self.find_pieces(own_king);
 
@@ -132,9 +251,9 @@ impl Board {
         false
     }
 
-    pub fn make_move(&mut self, x1: i32, y1: i32, x2: i32, y2: i32) {
-        self.earlier_moves.push((x1, y1, x2, y2));
-
+    pub fn make_move(&mut self, coords: (i32, i32, i32, i32)) {
+        self.earlier_moves.push(coords);
+        let (x1, y1, x2, y2) = coords;
         // castling
         if x1 == 4
             && y1 % 7 == 0
@@ -147,7 +266,7 @@ impl Board {
                 6 => (7, 5),
                 _ => unreachable!(),
             };
-            self.make_move(rx1, y1, rx2, y2);
+            self.make_move((rx1, y1, rx2, y2));
         }
 
         self.set_square(x2, y2, self.get_square(x1, y1).unwrap());
@@ -165,9 +284,9 @@ impl Board {
 
     pub fn get_possible_moves(&self) -> Vec<(i32, i32, i32, i32)> {
         self.get_candidate_moves()
-            .filter(|(x1, y1, x2, y2)| {
+            .filter(|cand_move| {
                 let mut next_board = self.clone();
-                next_board.make_move(*x1, *y1, *x2, *y2);
+                next_board.make_move(*cand_move);
                 !next_board.is_in_check(self.is_white_turn())
             })
             .collect()
@@ -295,8 +414,8 @@ impl Board {
             {
                 let mut test_check_5 = self.clone();
                 let mut test_check_6 = self.clone();
-                test_check_5.make_move(4, y, 5, y);
-                test_check_6.make_move(4, y, 6, y);
+                test_check_5.make_move((4, y, 5, y));
+                test_check_6.make_move((4, y, 6, y));
                 if !test_check_5.is_in_check(self.is_white_turn())
                     && !test_check_6.is_in_check(self.is_white_turn())
                 {
@@ -310,8 +429,8 @@ impl Board {
             {
                 let mut test_check_3 = self.clone();
                 let mut test_check_2 = self.clone();
-                test_check_3.make_move(4, y, 3, y);
-                test_check_2.make_move(4, y, 2, y);
+                test_check_3.make_move((4, y, 3, y));
+                test_check_2.make_move((4, y, 2, y));
                 if !test_check_3.is_in_check(self.is_white_turn())
                     && !test_check_2.is_in_check(self.is_white_turn())
                 {

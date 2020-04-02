@@ -15,7 +15,7 @@ fn handle_uci() {
     loop {
         let mut command = String::new();
         stdin().read_line(&mut command).unwrap();
-        while command.chars().last() == Some('\n') || command.chars().last() == Some('\r') {
+        while command.ends_with('\n') || command.ends_with('\r') {
             command.pop();
         }
 
@@ -36,8 +36,7 @@ fn handle_uci() {
                 board = Board::new();
                 if command_args.get(2) == Some(&"moves") {
                     for notation in command_args.iter().skip(3) {
-                        let (x1, y1, x2, y2) = notation_to_move(notation);
-                        board.make_move(x1, y1, x2, y2);
+                        board.make_move(notation_to_move(notation));
                     }
                 }
             }
