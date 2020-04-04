@@ -3,9 +3,12 @@ use std::fmt;
 use std::hash::{Hash, Hasher};
 
 #[derive(Clone)]
-pub struct Board {
-    squares: [[Square; 8]; 8],
+pub struct Position {
+    squares: [Square; 64],
     earlier_moves: Vec<(i32, i32, i32, i32)>,
+    possible_moves: Vec<(i32, i32, i32, i32)>,
+    move_draw_counter: u8,
+    is_check: bool,
 }
 
 #[derive(PartialEq, Eq, Copy, Clone, Debug, Hash)]
@@ -38,7 +41,7 @@ impl Square {
 
 struct PositionIterator {
     current_move: usize,
-    current_board: Board,
+    current_position: Position,
     moves: Vec<(i32, i32, i32, i32)>,
 }
 
@@ -46,99 +49,121 @@ impl PositionIterator {
     pub fn new(moves: Vec<(i32, i32, i32, i32)>) -> PositionIterator {
         PositionIterator {
             moves,
-            current_board: Board::new(),
+            current_position: Position::new(),
             current_move: 0,
         }
     }
 }
 
+struct Move {
+    from: u8,
+    to: u8,
+    is_capture: bool,
+    is_pawn_move: bool,
+}
+
 impl Iterator for PositionIterator {
-    type Item = Board;
+    type Item = Position;
     fn next(&mut self) -> Option<Self::Item> {
         if self.current_move >= self.moves.len() {
             return None;
         }
 
-        self.current_board.make_move(self.moves[self.current_move]);
+        self.current_position
+            .make_move(self.moves[self.current_move]);
         self.current_move += 1;
 
-        Some(self.current_board.clone())
+        Some(self.current_position.clone())
     }
 }
 
-impl Eq for Board {}
+impl Eq for Position {}
 
-impl PartialEq for Board {
-    fn eq(&self, other: &Board) -> bool {
-        self.squares == other.squares
+impl PartialEq for Position {
+    fn eq(&self, other: &Position) -> bool {
+        self.squares
+            .iter()
+            .zip(other.squares.iter())
+            .all(|(s1, s2)| s1 == s2)
     }
 }
 
-impl Hash for Board {
+impl Hash for Position {
     fn hash<H: Hasher>(&self, state: &mut H) {
         self.squares.hash(state);
     }
 }
 
-impl Board {
-    pub fn new() -> Board {
-        Board {
-            squares: [
-                [
-                    WhiteRook,
-                    WhiteKnight,
-                    WhiteBishop,
-                    WhiteQueen,
-                    WhiteKing,
-                    WhiteBishop,
-                    WhiteKnight,
-                    WhiteRook,
-                ],
-                [WhitePawn; 8],
-                [Empty; 8],
-                [Empty; 8],
-                [Empty; 8],
-                [Empty; 8],
-                [BlackPawn; 8],
-                [
-                    BlackRook,
-                    BlackKnight,
-                    BlackBishop,
-                    BlackQueen,
-                    BlackKing,
-                    BlackBishop,
-                    BlackKnight,
-                    BlackRook,
-                ],
-            ],
+impl Position {
+    pub fn new() -> Position {
+        let mut squares = [Empty; 64];
+        squares[0..8].copy_from_slice(&[
+            WhiteRook,
+            WhiteKnight,
+            WhiteBishop,
+            WhiteQueen,
+            WhiteKing,
+            WhiteBishop,
+            WhiteKnight,
+            WhiteRook,
+        ]);
+        squares[8..16].copy_from_slice(&[WhitePawn; 8]);
+        squares[48..56].copy_from_slice(&[BlackPawn; 8]);
+        squares[56..64].copy_from_slice(&[
+            BlackRook,
+            BlackKnight,
+            BlackBishop,
+            BlackQueen,
+            BlackKing,
+            BlackBishop,
+            BlackKnight,
+            BlackRook,
+        ]);
+        let mut pos = Position {
+            squares,
             earlier_moves: vec![],
-        }
+            is_check: false,
+            move_draw_counter: 0,
+            possible_moves: vec![],
+        };
+
+        pos.possible_moves = pos.calculate_possible_moves();
+        pos
     }
 
-    pub fn get_earlier_positions(&self) -> impl Iterator<Item = Board> {
+    pub fn get_earlier_positions(&self) -> impl Iterator<Item = Position> {
         PositionIterator::new(self.earlier_moves.clone())
     }
 
-    pub fn is_checkmate(&self) -> bool {
-        self.is_in_check(self.is_white_turn()) && self.get_possible_moves().is_empty()
-    }
-
-    pub fn is_draw(&self) -> bool {
-        if !self.is_in_check(self.is_white_turn()) && self.get_possible_moves().is_empty() {
-            return true;
+    pub fn is_draw_or_checkmate(&self) -> (bool, bool) {
+        if self.possible_moves.is_empty() {
+            if self.is_in_check(self.is_white_turn()) {
+                return (false, true);
+            } else {
+                return (true, false);
+            }
         }
         if self.is_insufficient_material()
             || self.is_threefold_repetition()
             || self.is_50_move_rule()
         {
-            return true;
+            return (true, false);
         }
+        (false, false)
+    }
 
-        false
+    pub fn is_checkmate(&self) -> bool {
+        self.is_draw_or_checkmate().1
+    }
+
+    pub fn is_draw(&self) -> bool {
+        self.is_draw_or_checkmate().0
     }
 
     fn is_50_move_rule(&self) -> bool {
-        if self.earlier_moves.len() <= 100 {
+        self.move_draw_counter >= 100
+
+        /*if self.earlier_moves.len() <= 100 {
             return false;
         }
         for (i, position) in self
@@ -156,7 +181,7 @@ impl Board {
                 return false;
             }
         }
-        false
+        false*/
     }
 
     fn is_threefold_repetition(&self) -> bool {
@@ -174,12 +199,12 @@ impl Board {
     }
 
     fn is_insufficient_material(&self) -> bool {
-        if self.find_pieces(WhiteQueen).is_empty()
-            && self.find_pieces(BlackQueen).is_empty()
+        if self.find_pieces(WhitePawn).is_empty()
+            && self.find_pieces(BlackPawn).is_empty()
             && self.find_pieces(WhiteRook).is_empty()
             && self.find_pieces(BlackRook).is_empty()
-            && self.find_pieces(WhitePawn).is_empty()
-            && self.find_pieces(BlackPawn).is_empty()
+            && self.find_pieces(WhiteQueen).is_empty()
+            && self.find_pieces(BlackQueen).is_empty()
         {
             let white_bishops = self.find_pieces(WhiteBishop);
             let black_bishops = self.find_pieces(BlackBishop);
@@ -236,11 +261,11 @@ impl Board {
         let (x, y) = own_kings[0];
 
         let check_tests = [
-            Board::is_in_check_by_pawn,
-            Board::is_in_check_by_king,
-            Board::is_in_check_by_knight,
-            Board::is_in_check_by_rook_or_queen,
-            Board::is_in_check_by_bishop_or_queen,
+            Position::is_in_check_by_pawn,
+            Position::is_in_check_by_king,
+            Position::is_in_check_by_knight,
+            Position::is_in_check_by_rook_or_queen,
+            Position::is_in_check_by_bishop_or_queen,
         ];
 
         for check_test in check_tests.iter() {
@@ -251,7 +276,28 @@ impl Board {
         false
     }
 
+    pub fn get_next_bare_boards(&self) -> Vec<((i32, i32, i32, i32), [Square; 64])> {
+        let mut next_boards = Vec::new();
+        for possible_move in &self.possible_moves {
+            let mut next_position = self.clone();
+            next_position.make_move_bare(*possible_move);
+            next_boards.push((*possible_move, next_position.squares));
+        }
+        next_boards
+    }
+
     pub fn make_move(&mut self, coords: (i32, i32, i32, i32)) {
+        // TODO check to clear counter
+        self.move_draw_counter += 1;
+        self.earlier_moves.push(coords);
+
+        self.make_move_bare(coords);
+
+        self.possible_moves = self.calculate_possible_moves();
+        //self.is_check = self.is_in_check(self.is_white_turn());
+    }
+
+    fn make_move_bare(&mut self, coords: (i32, i32, i32, i32)) {
         let (x1, y1, x2, y2) = coords;
         // castling
         if x1 == 4
@@ -267,10 +313,9 @@ impl Board {
             };
             self.set_square(rx2, y2, self.get_square(rx1, y1).unwrap());
             self.set_square(rx1, y1, Empty);
-        }
 
-        self.earlier_moves.push(coords);
-        self.set_square(x2, y2, self.get_square(x1, y1).unwrap());
+            self.set_square(x2, y2, self.get_square(x1, y1).unwrap());
+        }
 
         // TODO can only promote to queen
         if y1 == 6 && self.get_square(x1, y1) == Some(WhitePawn) {
@@ -283,12 +328,16 @@ impl Board {
         self.set_square(x1, y1, Empty);
     }
 
-    pub fn get_possible_moves(&self) -> Vec<(i32, i32, i32, i32)> {
+    pub fn get_possible_moves(&self) -> &Vec<(i32, i32, i32, i32)> {
+        &self.possible_moves
+    }
+
+    fn calculate_possible_moves(&self) -> Vec<(i32, i32, i32, i32)> {
         self.get_candidate_moves()
             .filter(|cand_move| {
-                let mut next_board = self.clone();
-                next_board.make_move(*cand_move);
-                !next_board.is_in_check(self.is_white_turn())
+                let mut next_position = self.clone();
+                next_position.make_move(*cand_move);
+                !next_position.is_in_check(self.is_white_turn())
             })
             .collect()
     }
@@ -503,13 +552,13 @@ impl Board {
 
     pub fn set_square(&mut self, x: i32, y: i32, square: Square) {
         if 0 <= x && x <= 7 && 0 <= y && y <= 7 {
-            self.squares[y as usize][x as usize] = square;
+            self.squares[(y * 8 + x) as usize] = square;
         }
     }
 
     pub fn get_square(&self, x: i32, y: i32) -> Option<Square> {
         if 0 <= x && x <= 7 && 0 <= y && y <= 7 {
-            Some(self.squares[y as usize][x as usize])
+            Some(self.squares[(y * 8 + x) as usize])
         } else {
             None
         }
@@ -518,7 +567,6 @@ impl Board {
     pub fn find_pieces(&self, piece: Square) -> Vec<(i32, i32)> {
         self.squares
             .iter()
-            .flatten()
             .enumerate()
             .filter(|(_, s)| *s == &piece)
             .map(|(i, _)| ((i % 8) as i32, (i / 8) as i32))
@@ -622,14 +670,14 @@ impl Board {
     }
 }
 
-impl fmt::Display for Board {
+impl fmt::Display for Position {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         let mut text = String::new();
-        for row in self.squares.iter().rev() {
-            for piece in row {
+        for y in 0..8 {
+            for x in 0..8 {
                 text += &format!(
                     "{} ",
-                    match piece {
+                    match self.get_square(x, y).unwrap() {
                         Square::Empty => ".",
                         WhiteKing => "K",
                         WhiteQueen => "Q",
