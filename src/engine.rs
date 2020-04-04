@@ -1,4 +1,4 @@
-use crate::position::{Position, Square, Square::*};
+use crate::position::{Move, Position, Square, Square::*};
 use std::time::{Duration, Instant};
 
 pub struct Engine {
@@ -26,7 +26,7 @@ impl Engine {
 }
 
 pub struct SearchOutput {
-    pub best_move: (i32, i32, i32, i32),
+    pub best_move: Option<Move>,
     pub nodes_searched: usize,
     pub search_time: Duration,
     pub search_depth: usize,
@@ -49,16 +49,16 @@ impl Engine {
         }
     }
 
-    fn min_max_search(&mut self, position: Position, depth: usize) -> ((i32,i32,i32,i32), f64) {
+    fn min_max_search(&mut self, position: Position, depth: usize) -> (Option<Move>, f64) {
         self.nodes_searched += 1;
 
         match position.is_draw_or_checkmate() {
-            (true, false) => return ((-1,-1,-1,-1),0.0),
+            (true, false) => return (None, 0.0),
             (false, true) => {
                 if position.is_white_turn() {
-                    return ((-1,-1,-1,-1),std::f64::NEG_INFINITY);
+                    return (None, std::f64::NEG_INFINITY);
                 } else {
-                    return ((-1,-1,-1,-1),std::f64::INFINITY);
+                    return (None, std::f64::INFINITY);
                 }
             }
             (false, false) => (),
@@ -72,15 +72,15 @@ impl Engine {
             for (possible_move, position) in next_positions {
                 self.nodes_searched += 1;
                 let eval = Engine::heuristic_evaluation(position);
-                possible_moves_evaluated.push((possible_move, eval));
+                possible_moves_evaluated.push((Some(possible_move), eval));
             }
         } else {
             let possible_moves = position.get_possible_moves();
             for possible_move in possible_moves {
                 let mut next_position = position.clone();
-                next_position.make_move(*possible_move);
+                next_position.make_move(possible_move);
                 let eval = self.min_max_search(next_position, depth - 1).1;
-                possible_moves_evaluated.push((*possible_move, eval));
+                possible_moves_evaluated.push((Some(possible_move), eval));
             }
         }
 

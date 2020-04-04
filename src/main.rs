@@ -4,7 +4,7 @@ mod engine;
 mod position;
 
 use engine::{Engine, SearchOutput};
-use position::Position;
+use position::{Move, Position};
 
 fn main() {
     handle_uci();
@@ -13,7 +13,7 @@ fn main() {
 fn handle_uci() {
     let mut position = Position::new();
     let mut engine = Engine::new();
-    engine.set_depth(3);
+    engine.set_depth(4);
     loop {
         let mut command = String::new();
         stdin().read_line(&mut command).unwrap();
@@ -38,7 +38,7 @@ fn handle_uci() {
                 position = Position::new();
                 if command_args.get(2) == Some(&"moves") {
                     for notation in command_args.iter().skip(3) {
-                        position.make_move(notation_to_move(notation));
+                        position.make_move(Move::from_notation(notation));
                     }
                 }
             }
@@ -65,33 +65,11 @@ fn handle_uci() {
                     nodes_searched,
                     nps,
                     search_time.as_millis(),
-                    move_to_notation(best_move)
+                    best_move.expect("could not find a move (probably a checkmate or draw)")
                 );
-                println!("bestmove {}", move_to_notation(best_move));
+                println!("bestmove {}", best_move.unwrap());
             }
             _ => (), //panic!("unknown command {}", command),
         }
     }
-}
-
-fn move_to_notation(move_coords: (i32, i32, i32, i32)) -> String {
-    let (x1, y1, x2, y2) = move_coords;
-    let files = ["a", "b", "c", "d", "e", "f", "g", "h"];
-    format!(
-        "{}{}{}{}",
-        files[x1 as usize],
-        y1 + 1,
-        files[x2 as usize],
-        y2 + 1
-    )
-}
-
-fn notation_to_move(notation: &str) -> (i32, i32, i32, i32) {
-    let mut bytes = notation.bytes();
-    (
-        bytes.next().unwrap() as i32 - 97,
-        bytes.next().unwrap() as i32 - 49,
-        bytes.next().unwrap() as i32 - 97,
-        bytes.next().unwrap() as i32 - 49,
-    )
 }
