@@ -16,35 +16,6 @@ impl PartialEq for Position {
             .all(|(a, b)| a == b)
             && self.position_flags & PositionFlags::COMPARE_FLAGS
                 == other.position_flags & PositionFlags::COMPARE_FLAGS
-        /*&& if self.position_flags.contains(PositionFlags::CAN_EN_PASSANT)
-            || other.position_flags.contains(PositionFlags::CAN_EN_PASSANT)
-        {
-            for coords in [
-                self.find_pieces(WhitePawn),
-                self.find_pieces(BlackPawn),
-            ]
-            .iter()
-            {
-                // en passant
-                for (x, y) in coords {
-                    for dx in [-1, 1].iter() {
-                        if *y == if self.is_white_turn() { 4 } else { 3 }
-                            && ((self.position_flags & PositionFlags::EN_PASSANT_FILE_MASK)
-                                .bits
-                                == (x + dx) as u16
-                                || (other.position_flags & PositionFlags::EN_PASSANT_FILE_MASK)
-                                    .bits
-                                    == (x + dx) as u16)
-                        {
-                            return false;
-                        }
-                    }
-                }
-            }
-            true
-        } else {
-            true
-        }*/
     }
 }
 
@@ -253,13 +224,17 @@ impl Position {
         self.is_in_check(self.is_white_turn())
     }
 
-    fn is_in_check(&self, is_white: bool) -> bool {
+    fn find_king(&self, is_white: bool) -> u8 {
         let own_king = if is_white { WhiteKing } else { BlackKing };
-        let own_kings = self.find_pieces(own_king);
+        for (i, square) in self.squares.iter().enumerate() {
+            if *square == own_king { return i as u8; }
+        }
+        unreachable!();
+    }
 
-        assert_eq!(own_kings.len(), 1);
-
-        let (x, y) = own_kings[0];
+    fn is_in_check(&self, is_white: bool) -> bool {
+        let own_king_pos = self.find_king(is_white);
+        let (x, y) = (own_king_pos as i32 % 8, own_king_pos as i32 / 8);
 
         let check_tests = [
             Position::is_in_check_by_pawn,
@@ -623,15 +598,16 @@ impl Position {
                 && self
                     .position_flags
                     .contains(PositionFlags::CAN_BLACK_CASTLE_KINGSIDE)))
-            && !self.is_in_check(self.is_white_turn())
+            && !self.is_check()
             && self.squares[8 * y as usize + 5] == Empty
             && self.squares[8 * y as usize + 6] == Empty
         {
             let mut test_check_5 = self.clone();
             test_check_5.squares[8 * y as usize + 5] = test_check_5.squares[8 * y as usize + 4];
             test_check_5.squares[8 * y as usize + 4] = Empty;
+            test_check_5.position_flags.toggle(PositionFlags::IS_WHITE_TURN);
 
-            if !test_check_5.is_in_check(self.is_white_turn()) {
+            if !test_check_5.is_check() {
                 candidate_moves.push(Move {
                     from: (8 * y + x) as u8,
                     to: (8 * y + x + 2) as u8,
@@ -648,7 +624,7 @@ impl Position {
                 && self
                     .position_flags
                     .contains(PositionFlags::CAN_BLACK_CASTLE_QUEENSIDE)))
-            && !self.is_in_check(self.is_white_turn())
+            && !self.is_check()
             && self.squares[8 * y as usize + 1] == Empty
             && self.squares[8 * y as usize + 2] == Empty
             && self.squares[8 * y as usize + 3] == Empty
@@ -657,10 +633,12 @@ impl Position {
             let mut test_check_2 = self.clone();
             test_check_3.squares[8 * y as usize + 3] = test_check_2.squares[8 * y as usize + 4];
             test_check_3.squares[8 * y as usize + 4] = Empty;
+            test_check_3.position_flags.toggle(PositionFlags::IS_WHITE_TURN);
             test_check_2.squares[8 * y as usize + 2] = test_check_2.squares[8 * y as usize + 4];
             test_check_2.squares[8 * y as usize + 4] = Empty;
-            if !test_check_3.is_in_check(self.is_white_turn())
-                && !test_check_2.is_in_check(self.is_white_turn())
+            test_check_2.position_flags.toggle(PositionFlags::IS_WHITE_TURN);
+            if !test_check_3.is_check()
+                && !test_check_2.is_check()
             {
                 candidate_moves.push(Move {
                     from: (8 * y + x) as u8,
