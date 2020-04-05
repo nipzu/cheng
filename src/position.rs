@@ -227,7 +227,9 @@ impl Position {
     fn find_king(&self, is_white: bool) -> u8 {
         let own_king = if is_white { WhiteKing } else { BlackKing };
         for (i, square) in self.squares.iter().enumerate() {
-            if *square == own_king { return i as u8; }
+            if *square == own_king {
+                return i as u8;
+            }
         }
         unreachable!();
     }
@@ -605,7 +607,9 @@ impl Position {
             let mut test_check_5 = self.clone();
             test_check_5.squares[8 * y as usize + 5] = test_check_5.squares[8 * y as usize + 4];
             test_check_5.squares[8 * y as usize + 4] = Empty;
-            test_check_5.position_flags.toggle(PositionFlags::IS_WHITE_TURN);
+            test_check_5
+                .position_flags
+                .toggle(PositionFlags::IS_WHITE_TURN);
 
             if !test_check_5.is_check() {
                 candidate_moves.push(Move {
@@ -633,13 +637,15 @@ impl Position {
             let mut test_check_2 = self.clone();
             test_check_3.squares[8 * y as usize + 3] = test_check_2.squares[8 * y as usize + 4];
             test_check_3.squares[8 * y as usize + 4] = Empty;
-            test_check_3.position_flags.toggle(PositionFlags::IS_WHITE_TURN);
+            test_check_3
+                .position_flags
+                .toggle(PositionFlags::IS_WHITE_TURN);
             test_check_2.squares[8 * y as usize + 2] = test_check_2.squares[8 * y as usize + 4];
             test_check_2.squares[8 * y as usize + 4] = Empty;
-            test_check_2.position_flags.toggle(PositionFlags::IS_WHITE_TURN);
-            if !test_check_3.is_check()
-                && !test_check_2.is_check()
-            {
+            test_check_2
+                .position_flags
+                .toggle(PositionFlags::IS_WHITE_TURN);
+            if !test_check_3.is_check() && !test_check_2.is_check() {
                 candidate_moves.push(Move {
                     from: (8 * y + x) as u8,
                     to: (8 * y + x - 2) as u8,
@@ -660,31 +666,85 @@ impl Position {
     fn get_rook_candidate_moves(&self, x: i32, y: i32) -> Vec<Move> {
         use std::iter::repeat;
 
-        let mut candidate_moves = Vec::new();
-        for deltas in vec![
-            &mut (x + 1..8).zip(repeat(y)) as &mut dyn Iterator<Item = (i32, i32)>,
-            &mut (repeat(x)).zip(y + 1..8),
-            &mut (0..x).rev().zip(repeat(y)),
-            &mut (repeat(x)).zip((0..y).rev()),
-        ] {
-            for (dx, dy) in deltas {
-                if let Some(piece) = self.get_square(dx, dy) {
-                    if piece == Empty {
-                        candidate_moves.push(Move {
-                            from: (8 * y + x) as u8,
-                            to: (8 * dy + dx) as u8,
-                            move_flags: MoveFlags::empty(),
-                        });
-                    } else if piece.is_white() != self.is_white_turn() {
-                        candidate_moves.push(Move {
-                            from: (8 * y + x) as u8,
-                            to: (8 * dy + dx) as u8,
-                            move_flags: MoveFlags::IS_CAPTURE,
-                        });
-                        break;
-                    } else {
-                        break;
-                    }
+        let mut candidate_moves = Vec::with_capacity(16);
+
+        for (dx, dy) in (x + 1..8).zip(repeat(y)) {
+            if let Some(piece) = self.get_square(dx, dy) {
+                if piece == Empty {
+                    candidate_moves.push(Move {
+                        from: (8 * y + x) as u8,
+                        to: (8 * dy + dx) as u8,
+                        move_flags: MoveFlags::empty(),
+                    });
+                } else if piece.is_white() != self.is_white_turn() {
+                    candidate_moves.push(Move {
+                        from: (8 * y + x) as u8,
+                        to: (8 * dy + dx) as u8,
+                        move_flags: MoveFlags::IS_CAPTURE,
+                    });
+                    break;
+                } else {
+                    break;
+                }
+            }
+        }
+        for (dx, dy) in (repeat(x)).zip(y + 1..8) {
+            if let Some(piece) = self.get_square(dx, dy) {
+                if piece == Empty {
+                    candidate_moves.push(Move {
+                        from: (8 * y + x) as u8,
+                        to: (8 * dy + dx) as u8,
+                        move_flags: MoveFlags::empty(),
+                    });
+                } else if piece.is_white() != self.is_white_turn() {
+                    candidate_moves.push(Move {
+                        from: (8 * y + x) as u8,
+                        to: (8 * dy + dx) as u8,
+                        move_flags: MoveFlags::IS_CAPTURE,
+                    });
+                    break;
+                } else {
+                    break;
+                }
+            }
+        }
+        for (dx, dy) in (0..x).rev().zip(repeat(y)) {
+            if let Some(piece) = self.get_square(dx, dy) {
+                if piece == Empty {
+                    candidate_moves.push(Move {
+                        from: (8 * y + x) as u8,
+                        to: (8 * dy + dx) as u8,
+                        move_flags: MoveFlags::empty(),
+                    });
+                } else if piece.is_white() != self.is_white_turn() {
+                    candidate_moves.push(Move {
+                        from: (8 * y + x) as u8,
+                        to: (8 * dy + dx) as u8,
+                        move_flags: MoveFlags::IS_CAPTURE,
+                    });
+                    break;
+                } else {
+                    break;
+                }
+            }
+        }
+        for (dx, dy) in (repeat(x)).zip((0..y).rev()) {
+            if let Some(piece) = self.get_square(dx, dy) {
+                if piece == Empty {
+                    candidate_moves.push(Move {
+                        from: (8 * y + x) as u8,
+                        to: (8 * dy + dx) as u8,
+                        move_flags: MoveFlags::empty(),
+                    });
+                } else if piece.is_white() != self.is_white_turn() {
+                    candidate_moves.push(Move {
+                        from: (8 * y + x) as u8,
+                        to: (8 * dy + dx) as u8,
+                        move_flags: MoveFlags::IS_CAPTURE,
+                    });
+                    break;
+                } else {
+                    break;
                 }
             }
         }
@@ -693,31 +753,85 @@ impl Position {
     }
 
     fn get_bishop_candidate_moves(&self, x: i32, y: i32) -> Vec<Move> {
-        let mut candidate_moves = Vec::new();
-        for deltas in vec![
-            &mut (x + 1..8).zip(y + 1..8) as &mut dyn Iterator<Item = (i32, i32)>,
-            &mut (x + 1..8).zip((0..y).rev()),
-            &mut (0..x).rev().zip(y + 1..8),
-            &mut (0..x).rev().zip((0..y).rev()),
-        ] {
-            for (dx, dy) in deltas {
-                if let Some(piece) = self.get_square(dx, dy) {
-                    if piece == Empty {
-                        candidate_moves.push(Move {
-                            from: (8 * y + x) as u8,
-                            to: (8 * dy + dx) as u8,
-                            move_flags: MoveFlags::empty(),
-                        });
-                    } else if piece.is_white() != self.is_white_turn() {
-                        candidate_moves.push(Move {
-                            from: (8 * y + x) as u8,
-                            to: (8 * dy + dx) as u8,
-                            move_flags: MoveFlags::IS_CAPTURE,
-                        });
-                        break;
-                    } else {
-                        break;
-                    }
+        let mut candidate_moves = Vec::with_capacity(16);
+
+        for (dx, dy) in (x + 1..8).zip(y + 1..8) {
+            if let Some(piece) = self.get_square(dx, dy) {
+                if piece == Empty {
+                    candidate_moves.push(Move {
+                        from: (8 * y + x) as u8,
+                        to: (8 * dy + dx) as u8,
+                        move_flags: MoveFlags::empty(),
+                    });
+                } else if piece.is_white() != self.is_white_turn() {
+                    candidate_moves.push(Move {
+                        from: (8 * y + x) as u8,
+                        to: (8 * dy + dx) as u8,
+                        move_flags: MoveFlags::IS_CAPTURE,
+                    });
+                    break;
+                } else {
+                    break;
+                }
+            }
+        }
+        for (dx, dy) in (x + 1..8).zip((0..y).rev()) {
+            if let Some(piece) = self.get_square(dx, dy) {
+                if piece == Empty {
+                    candidate_moves.push(Move {
+                        from: (8 * y + x) as u8,
+                        to: (8 * dy + dx) as u8,
+                        move_flags: MoveFlags::empty(),
+                    });
+                } else if piece.is_white() != self.is_white_turn() {
+                    candidate_moves.push(Move {
+                        from: (8 * y + x) as u8,
+                        to: (8 * dy + dx) as u8,
+                        move_flags: MoveFlags::IS_CAPTURE,
+                    });
+                    break;
+                } else {
+                    break;
+                }
+            }
+        }
+        for (dx, dy) in (0..x).rev().zip(y + 1..8) {
+            if let Some(piece) = self.get_square(dx, dy) {
+                if piece == Empty {
+                    candidate_moves.push(Move {
+                        from: (8 * y + x) as u8,
+                        to: (8 * dy + dx) as u8,
+                        move_flags: MoveFlags::empty(),
+                    });
+                } else if piece.is_white() != self.is_white_turn() {
+                    candidate_moves.push(Move {
+                        from: (8 * y + x) as u8,
+                        to: (8 * dy + dx) as u8,
+                        move_flags: MoveFlags::IS_CAPTURE,
+                    });
+                    break;
+                } else {
+                    break;
+                }
+            }
+        }
+        for (dx, dy) in (0..x).rev().zip((0..y).rev()) {
+            if let Some(piece) = self.get_square(dx, dy) {
+                if piece == Empty {
+                    candidate_moves.push(Move {
+                        from: (8 * y + x) as u8,
+                        to: (8 * dy + dx) as u8,
+                        move_flags: MoveFlags::empty(),
+                    });
+                } else if piece.is_white() != self.is_white_turn() {
+                    candidate_moves.push(Move {
+                        from: (8 * y + x) as u8,
+                        to: (8 * dy + dx) as u8,
+                        move_flags: MoveFlags::IS_CAPTURE,
+                    });
+                    break;
+                } else {
+                    break;
                 }
             }
         }
@@ -798,20 +912,40 @@ impl Position {
             (WhiteRook, WhiteQueen)
         };
 
-        for deltas in vec![
-            &mut (x + 1..8).zip(repeat(y)) as &mut dyn Iterator<Item = (i32, i32)>,
-            &mut (repeat(x)).zip(y + 1..8),
-            &mut (0..x).rev().zip(repeat(y)),
-            &mut (repeat(x)).zip((0..y).rev()),
-        ] {
-            for (dx, dy) in deltas {
-                if self.get_square(dx, dy) == Some(enemy_rook)
-                    || self.get_square(dx, dy) == Some(enemy_queen)
-                {
-                    return true;
-                } else if self.get_square(dx, dy) != Some(Empty) {
-                    break;
-                }
+        for (dx, dy) in (x + 1..8).zip(repeat(y)) {
+            if self.get_square(dx, dy) == Some(enemy_rook)
+                || self.get_square(dx, dy) == Some(enemy_queen)
+            {
+                return true;
+            } else if self.get_square(dx, dy) != Some(Empty) {
+                break;
+            }
+        }
+        for (dx, dy) in (repeat(x)).zip(y + 1..8) {
+            if self.get_square(dx, dy) == Some(enemy_rook)
+                || self.get_square(dx, dy) == Some(enemy_queen)
+            {
+                return true;
+            } else if self.get_square(dx, dy) != Some(Empty) {
+                break;
+            }
+        }
+        for (dx, dy) in (0..x).rev().zip(repeat(y)) {
+            if self.get_square(dx, dy) == Some(enemy_rook)
+                || self.get_square(dx, dy) == Some(enemy_queen)
+            {
+                return true;
+            } else if self.get_square(dx, dy) != Some(Empty) {
+                break;
+            }
+        }
+        for (dx, dy) in (repeat(x)).zip((0..y).rev()) {
+            if self.get_square(dx, dy) == Some(enemy_rook)
+                || self.get_square(dx, dy) == Some(enemy_queen)
+            {
+                return true;
+            } else if self.get_square(dx, dy) != Some(Empty) {
+                break;
             }
         }
 
@@ -825,20 +959,40 @@ impl Position {
             (WhiteBishop, WhiteQueen)
         };
 
-        for deltas in vec![
-            &mut (x + 1..8).zip(y + 1..8) as &mut dyn Iterator<Item = (i32, i32)>,
-            &mut (x + 1..8).zip((0..y).rev()),
-            &mut (0..x).rev().zip(y + 1..8),
-            &mut (0..x).rev().zip((0..y).rev()),
-        ] {
-            for (dx, dy) in deltas {
-                if self.get_square(dx, dy) == Some(enemy_bishop)
-                    || self.get_square(dx, dy) == Some(enemy_queen)
-                {
-                    return true;
-                } else if self.get_square(dx, dy) != Some(Empty) {
-                    break;
-                }
+        for (dx, dy) in (x + 1..8).zip(y + 1..8) {
+            if self.get_square(dx, dy) == Some(enemy_bishop)
+                || self.get_square(dx, dy) == Some(enemy_queen)
+            {
+                return true;
+            } else if self.get_square(dx, dy) != Some(Empty) {
+                break;
+            }
+        }
+        for (dx, dy) in (x + 1..8).zip((0..y).rev()) {
+            if self.get_square(dx, dy) == Some(enemy_bishop)
+                || self.get_square(dx, dy) == Some(enemy_queen)
+            {
+                return true;
+            } else if self.get_square(dx, dy) != Some(Empty) {
+                break;
+            }
+        }
+        for (dx, dy) in (0..x).rev().zip(y + 1..8) {
+            if self.get_square(dx, dy) == Some(enemy_bishop)
+                || self.get_square(dx, dy) == Some(enemy_queen)
+            {
+                return true;
+            } else if self.get_square(dx, dy) != Some(Empty) {
+                break;
+            }
+        }
+        for (dx, dy) in (0..x).rev().zip((0..y).rev()) {
+            if self.get_square(dx, dy) == Some(enemy_bishop)
+                || self.get_square(dx, dy) == Some(enemy_queen)
+            {
+                return true;
+            } else if self.get_square(dx, dy) != Some(Empty) {
+                break;
             }
         }
         false

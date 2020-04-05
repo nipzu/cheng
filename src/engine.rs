@@ -131,9 +131,15 @@ impl Engine {
         self.game_tree.pop();
 
         let best_move = if self.game_tree.last().unwrap().is_white_turn() {
-            *possible_moves_evaluated.iter().max_by(|a,b| a.1.partial_cmp(&b.1).unwrap()).unwrap()
+            *possible_moves_evaluated
+                .iter()
+                .max_by(|a, b| a.1.partial_cmp(&b.1).unwrap())
+                .unwrap()
         } else {
-            *possible_moves_evaluated.iter().min_by(|a,b| a.1.partial_cmp(&b.1).unwrap()).unwrap()
+            *possible_moves_evaluated
+                .iter()
+                .min_by(|a, b| a.1.partial_cmp(&b.1).unwrap())
+                .unwrap()
         };
 
         best_move
