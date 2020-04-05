@@ -4,14 +4,13 @@ mod engine;
 mod position;
 
 use engine::{Engine, SearchOutput};
-use position::{Move, Position};
+use position::Move;
 
 fn main() {
     handle_uci();
 }
 
 fn handle_uci() {
-    let mut position = Position::new();
     let mut engine = Engine::new();
     engine.set_depth(4);
     loop {
@@ -30,44 +29,44 @@ fn handle_uci() {
                 println!("uciok");
             }
             "isready" => println!("readyok"),
-            "ucinewgame" => position = Position::new(),
+            "ucinewgame" => engine.set_game_tree(&mut std::iter::empty()),
             "position" => {
                 if command_args[1] != "startpos" {
                     panic!("no startpos after position")
                 }
-                position = Position::new();
                 if command_args.get(2) == Some(&"moves") {
-                    for notation in command_args.iter().skip(3) {
-                        position.make_move(Move::from_notation(notation));
-                    }
+                    engine.set_game_tree(
+                        &mut command_args.iter().skip(3).map(|n| Move::from_notation(n)),
+                    );
                 }
             }
             "quit" => return,
             "debug" => {
-                println!("{}", position);
-                println!("draw? {}", position.is_draw());
-                println!("check? {}", position.is_check());
-                println!("checkmate? {}", position.is_checkmate());
-                println!("{:?}", position.get_possible_moves());
+                println!("{:?}", engine);
             }
             "go" => {
-                engine.set_root_node(&position);
                 let SearchOutput {
                     best_move,
                     search_time,
                     nodes_searched,
                     search_depth,
-                } = engine.find_best_move();
-                let nps = (nodes_searched as f64 / search_time.as_secs_f64()) as usize;
-                println!(
-                    "info depth {} nodes {} nps {} time {} pv {}",
-                    search_depth,
-                    nodes_searched,
-                    nps,
-                    search_time.as_millis(),
-                    best_move.expect("could not find a move (probably a checkmate or draw)")
-                );
-                println!("bestmove {}", best_move.unwrap());
+                    evaluation,
+                } = engine.search_game_tree();
+                if let Some(best_move) = best_move {
+                    let nps = (nodes_searched as f64 / search_time.as_secs_f64()) as usize;
+                    println!(
+                        "info depth {} nodes {} nps {} time {} score cp {} pv {}",
+                        search_depth,
+                        nodes_searched,
+                        nps,
+                        search_time.as_millis(),
+                        (evaluation * 100.0).round() as i32,
+                        best_move
+                    );
+                    println!("bestmove {}", best_move);
+                } else {
+                    println!("bestmove (none)");
+                }
             }
             _ => (), //panic!("unknown command {}", command),
         }

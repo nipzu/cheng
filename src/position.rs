@@ -1,32 +1,65 @@
-use std::collections::HashMap;
 use std::fmt;
-use std::hash::{Hash, Hasher};
 
 use bitflags::bitflags;
 
 #[derive(Clone)]
 pub struct Position {
     squares: [Square; 64],
-    earlier_moves: Vec<Move>,
-    //possible_moves: Vec<Move>,
-    move_draw_counter: u8,
+    is_white_turn: bool,
     position_flags: PositionFlags,
-    //is_check: bool,
+}
+
+impl PartialEq for Position {
+    fn eq(&self, other: &Position) -> bool {
+        self.is_white_turn == other.is_white_turn
+            && self
+                .squares
+                .iter()
+                .zip(other.squares.iter())
+                .all(|(a, b)| a == b)
+            && self.position_flags.bits & 0b0001_1110 == other.position_flags.bits & 0b0001_1110
+            && if self.position_flags.contains(PositionFlags::CAN_EN_PASSANT)
+                || other.position_flags.contains(PositionFlags::CAN_EN_PASSANT)
+            {
+                for (coords, dy) in [
+                    (self.find_pieces(WhitePawn), 1),
+                    (self.find_pieces(BlackPawn), -1),
+                ]
+                .iter()
+                {
+                    // en passant
+                    for (x, y) in coords {
+                        for dx in [-1, 1].iter() {
+                            if y - dy % 5 == 2
+                                && (PositionFlags::EN_PASSANT_FILE_MASK & self.position_flags).bits
+                                    >> 5
+                                    == (x + dx) as u8
+                            {
+                                return false;
+                            }
+                        }
+                    }
+                }
+                true
+            } else {
+                true
+            }
+    }
 }
 
 bitflags! {
     struct PositionFlags: u8 {
-        //const IS_CHECK                 = 0b0000_0001;
+        const CAN_EN_PASSANT             = 0b0000_0001;
         const CAN_WHITE_CASTLE_KINGSIDE  = 0b0000_0010;
         const CAN_BLACK_CASTLE_KINGSIDE  = 0b0000_0100;
         const CAN_WHITE_CASTLE_QUEENSIDE = 0b0000_1000;
         const CAN_BLACK_CASTLE_QUEENSIDE = 0b0001_0000;
-        // TODO add en passant
         const STARTING_POS               = 0b0001_1110;
+        const EN_PASSANT_FILE_MASK       = 0b1110_0000;
     }
 }
 
-#[derive(PartialEq, Eq, Copy, Clone, Debug, Hash)]
+#[derive(PartialEq, Eq, Copy, Clone)]
 pub enum Square {
     Empty,
     WhiteKing,
@@ -54,36 +87,19 @@ impl Square {
     }
 }
 
-struct PositionIterator {
-    current_move: usize,
-    current_position: Position,
-    moves: Vec<Move>,
-}
-
-impl PositionIterator {
-    pub fn new(moves: Vec<Move>) -> PositionIterator {
-        PositionIterator {
-            moves,
-            current_position: Position::new(),
-            current_move: 0,
-        }
-    }
-}
-
 bitflags! {
-    struct MoveFlags: u8 {
+    pub struct MoveFlags: u8 {
         const IS_PAWN_MOVE      = 0b0000_0001;
         const IS_CAPTURE        = 0b0000_0010;
         const PROMOTE_TO_QUEEN  = 0b0000_0101;
         const PROMOTE_TO_ROOK   = 0b0000_1001;
         const PROMOTE_TO_BISHOP = 0b0001_0001;
         const PROMOTE_TO_KNIGHT = 0b0010_0001;
-        //const IS_CASTLING     = 0b0100_0000;
         const FLAGS_UNKNOWN     = 0b1000_0000;
     }
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy)]
 pub struct Move {
     from: u8,
     to: u8,
@@ -98,19 +114,33 @@ impl Move {
         let to_x = bytes.next().unwrap() - 97;
         let to_y = bytes.next().unwrap() - 49;
 
-        let flags = match bytes.next() {
-            Some(b'q') => MoveFlags::PROMOTE_TO_QUEEN,
-            Some(b'r') => MoveFlags::PROMOTE_TO_ROOK,
-            Some(b'b') => MoveFlags::PROMOTE_TO_BISHOP,
-            Some(b'n') => MoveFlags::PROMOTE_TO_KNIGHT,
-            _ => MoveFlags::FLAGS_UNKNOWN,
-        };
+        let mut flags = MoveFlags::FLAGS_UNKNOWN;
+        if let Some(b) = bytes.next() {
+            // why tf doesnt it let it just panic
+            match b {
+                b'q' => flags = MoveFlags::PROMOTE_TO_QUEEN,
+                b'r' => flags = MoveFlags::PROMOTE_TO_ROOK,
+                b'b' => flags = MoveFlags::PROMOTE_TO_BISHOP,
+                b'n' => flags = MoveFlags::PROMOTE_TO_KNIGHT,
+                _ => panic!("invalid promotion"),
+            };
+            flags |= MoveFlags::IS_PAWN_MOVE;
+            flags |= if from_y != to_y {
+                MoveFlags::IS_CAPTURE
+            } else {
+                MoveFlags::empty()
+            }
+        }
 
         Move {
             from: 8 * from_y + from_x,
             to: 8 * to_y + to_x,
             flags,
         }
+    }
+
+    pub fn resets_draw_counters(&self) -> bool {
+        self.flags.contains(MoveFlags::IS_PAWN_MOVE) || self.flags.contains(MoveFlags::IS_CAPTURE)
     }
 }
 
@@ -122,49 +152,17 @@ impl fmt::Display for Move {
         let to_file = FILES[(self.to % 8) as usize];
         let to_rank = self.to / 8 + 1;
         let promote_to = match (self.flags.bits() >> 2).trailing_zeros() {
-            0 => 'q',
-            1 => 'r',
-            2 => 'b',
-            3 => 'n',
-            _ => ' ',
+            0 => "q",
+            1 => "r",
+            2 => "b",
+            3 => "n",
+            _ => "",
         };
         write!(
             f,
             "{}{}{}{}{}",
             from_file, from_rank, to_file, to_rank, promote_to
         )
-    }
-}
-
-impl Iterator for PositionIterator {
-    type Item = Position;
-    fn next(&mut self) -> Option<Self::Item> {
-        if self.current_move >= self.moves.len() {
-            return None;
-        }
-
-        self.current_position
-            .make_move(self.moves[self.current_move]);
-        self.current_move += 1;
-
-        Some(self.current_position.clone())
-    }
-}
-
-impl Eq for Position {}
-
-impl PartialEq for Position {
-    fn eq(&self, other: &Position) -> bool {
-        self.squares
-            .iter()
-            .zip(other.squares.iter())
-            .all(|(s1, s2)| s1 == s2)
-    }
-}
-
-impl Hash for Position {
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        self.squares.hash(state);
     }
 }
 
@@ -195,62 +193,16 @@ impl Position {
         ]);
         Position {
             squares,
-            earlier_moves: vec![],
-            //is_check: false,
-            move_draw_counter: 0,
-            //possible_moves: vec![],
             position_flags: PositionFlags::STARTING_POS,
+            is_white_turn: true,
         }
     }
 
-    pub fn get_earlier_positions(&self) -> impl Iterator<Item = Position> {
-        PositionIterator::new(self.earlier_moves.clone())
+    pub fn get_squares(&self) -> &[Square; 64] {
+        &self.squares
     }
 
-    pub fn is_draw_or_checkmate(&self) -> (bool, bool) {
-        if self.get_possible_moves().is_empty() {
-            if self.is_in_check(self.is_white_turn()) {
-                return (false, true);
-            } else {
-                return (true, false);
-            }
-        }
-        if self.is_insufficient_material()
-            || self.is_threefold_repetition()
-            || self.is_50_move_rule()
-        {
-            return (true, false);
-        }
-        (false, false)
-    }
-
-    pub fn is_checkmate(&self) -> bool {
-        self.is_draw_or_checkmate().1
-    }
-
-    pub fn is_draw(&self) -> bool {
-        self.is_draw_or_checkmate().0
-    }
-
-    fn is_50_move_rule(&self) -> bool {
-        self.move_draw_counter >= 100
-    }
-
-    fn is_threefold_repetition(&self) -> bool {
-        let mut previous_positions = HashMap::new();
-
-        for position in self.get_earlier_positions() {
-            if let Some(count) = previous_positions.get_mut(&position) {
-                *count += 1;
-            } else {
-                previous_positions.insert(position, 1);
-            }
-        }
-
-        previous_positions.iter().any(|(_, count)| *count >= 3)
-    }
-
-    fn is_insufficient_material(&self) -> bool {
+    pub fn is_insufficient_material(&self) -> bool {
         if self.find_pieces(WhitePawn).is_empty()
             && self.find_pieces(BlackPawn).is_empty()
             && self.find_pieces(WhiteRook).is_empty()
@@ -291,24 +243,13 @@ impl Position {
     }
 
     fn is_in_check(&self, is_white: bool) -> bool {
-        /*let own_king = if is_white { WhiteKing } else { BlackKing };
-                let own_kings = self.find_pieces(own_king);
-
-                assert_eq!(own_kings.len(), 1);
-
-                let (kx, ky) = own_kings[0];
-                for (_, _, x, y) in self.get_candidate_moves() {
-                    if kx == x && ky == y {
-                        return true;
-                    }
-                }
-                false
-        */
-
         let own_king = if is_white { WhiteKing } else { BlackKing };
         let own_kings = self.find_pieces(own_king);
 
-        assert_eq!(own_kings.len(), 1);
+        if own_kings.len() != 1 {
+            println!("{}", self);
+            panic!();
+        }
 
         let (x, y) = own_kings[0];
 
@@ -328,33 +269,26 @@ impl Position {
         false
     }
 
-    pub fn get_next_bare_boards(&self) -> Vec<(Move, [Square; 64])> {
-        let mut next_boards = Vec::new();
-        for possible_move in self.get_possible_moves() {
-            let mut next_position = self.clone();
-            next_position.make_move_bare(possible_move);
-            next_boards.push((possible_move, next_position.squares));
-        }
-        next_boards
-    }
+    fn get_unknown_flags(&self, m: &mut Move) {
+        m.flags.bits = 0;
 
-    pub fn make_move(&mut self, m: Move) {
-        // TODO unknown flags
-        self.move_draw_counter += 1;
-
-        if m.flags.contains(MoveFlags::IS_PAWN_MOVE) || m.flags.contains(MoveFlags::IS_CAPTURE) {
-            self.move_draw_counter = 0;
+        // ignore en passant for now
+        if self.squares[m.to as usize] != Empty {
+            m.flags |= MoveFlags::IS_CAPTURE;
         }
 
-        self.earlier_moves.push(m);
-
-        self.make_move_bare(m);
-
-        //self.possible_moves = self.calculate_possible_moves();
-        //self.is_check = self.is_in_check(self.is_white_turn());
+        if self.squares[m.from as usize] == WhitePawn || self.squares[m.from as usize] == BlackPawn
+        {
+            m.flags |= MoveFlags::IS_PAWN_MOVE;
+        }
+        // promotion is handled in from_notation
     }
 
-    fn make_move_bare(&mut self, m: Move) {
+    pub fn make_move(&mut self, mut m: Move) {
+        if m.flags.contains(MoveFlags::FLAGS_UNKNOWN) {
+            self.get_unknown_flags(&mut m);
+        }
+
         // castling
         if (m.from == 4 || m.from == 60)
             && m.from / 8 == m.to / 8
@@ -411,23 +345,69 @@ impl Position {
             self.position_flags -= PositionFlags::CAN_BLACK_CASTLE_KINGSIDE;
         }
 
+        if self.squares[m.to as usize] == WhiteKing || self.squares[m.to as usize] == BlackKing {
+            println!("{}", self);
+            println!("{}, {}", m.to, m.from);
+            println!("{:#b}", self.position_flags.bits);
+            panic!()
+        }
+
+        // check en passant square
+        if m.flags.contains(MoveFlags::IS_PAWN_MOVE)
+            && !m.flags.contains(MoveFlags::IS_CAPTURE)
+            && m.from % 8 != m.to % 8
+        {
+            self.squares[(m.to as i32 + if self.is_white_turn() { -8 } else { 8 }) as usize] =
+                Empty;
+        }
+
+        // here we actually make the move
         self.squares[m.to as usize] = self.squares[m.from as usize];
         self.squares[m.from as usize] = Empty;
+        // clear en passant bits
+        self.position_flags.bits &= 0b0001_1110;
 
-        // TODO  promotion
-        /*if y1 == 6 && self.get_square(x1, y1) == Some(WhitePawn) {
-            self.set_square(x2, y2, WhiteQueen)
+        if (self.squares[m.to as usize] == WhitePawn || self.squares[m.to as usize] == BlackPawn)
+            && ((m.from as i32 / 8) - (m.to as i32 / 8)).abs() == 2
+        {
+            self.position_flags |= PositionFlags::CAN_EN_PASSANT;
+            self.position_flags.bits |= m.from << 5;
         }
-        if y1 == 1 && self.get_square(x1, y1) == Some(BlackPawn) {
-            self.set_square(x2, y2, BlackQueen)
-        }*/
+
+        if m.flags.contains(MoveFlags::PROMOTE_TO_QUEEN) {
+            self.squares[m.to as usize] = if self.is_white_turn() {
+                WhiteQueen
+            } else {
+                BlackQueen
+            };
+        }
+
+        if m.flags.contains(MoveFlags::PROMOTE_TO_ROOK) {
+            self.squares[m.to as usize] = if self.is_white_turn() {
+                WhiteRook
+            } else {
+                BlackRook
+            };
+        }
+        if m.flags.contains(MoveFlags::PROMOTE_TO_BISHOP) {
+            self.squares[m.to as usize] = if self.is_white_turn() {
+                WhiteBishop
+            } else {
+                BlackBishop
+            };
+        }
+        if m.flags.contains(MoveFlags::PROMOTE_TO_KNIGHT) {
+            self.squares[m.to as usize] = if self.is_white_turn() {
+                WhiteKnight
+            } else {
+                BlackKnight
+            };
+        }
+
+        self.is_white_turn = !self.is_white_turn;
     }
 
     pub fn get_possible_moves(&self) -> Vec<Move> {
-        self.calculate_possible_moves()
-    }
-
-    fn calculate_possible_moves(&self) -> Vec<Move> {
         self.get_candidate_moves()
             .filter(|cand_move| {
                 let mut next_position = self.clone();
@@ -438,7 +418,7 @@ impl Position {
     }
 
     pub fn is_white_turn(&self) -> bool {
-        self.earlier_moves.len() % 2 == 0
+        self.is_white_turn
     }
 
     fn get_candidate_moves(&self) -> impl Iterator<Item = Move> + '_ {
@@ -466,47 +446,79 @@ impl Position {
     }
 
     fn get_pawn_candidate_moves(&self, x: i32, y: i32) -> Vec<Move> {
-        let (dy, enemy_pawn) = if self.is_white_turn() {
-            (1, BlackPawn)
-        } else {
-            (-1, WhitePawn)
-        };
+        let dy = if self.is_white_turn() { 1 } else { -1 };
 
         let mut candidate_moves = Vec::new();
         for dx in [1, -1].iter() {
             // basic capturing
             if let Some(piece) = self.get_square(x + dx, y + dy) {
                 if piece != Empty && piece.is_white() != self.is_white_turn() {
-                    candidate_moves.push(Move {
-                        from: (8 * y + x) as u8,
-                        to: (8 * (y + dy) + x + dx) as u8,
-                        flags: MoveFlags::IS_CAPTURE | MoveFlags::IS_PAWN_MOVE,
-                    });
+                    if (y + dy) % 7 == 0 {
+                        for p in [
+                            MoveFlags::PROMOTE_TO_QUEEN,
+                            MoveFlags::PROMOTE_TO_ROOK,
+                            MoveFlags::PROMOTE_TO_BISHOP,
+                            MoveFlags::PROMOTE_TO_KNIGHT,
+                        ]
+                        .iter()
+                        {
+                            candidate_moves.push(Move {
+                                from: (8 * y + x) as u8,
+                                to: (8 * (y + dy) + x + dx) as u8,
+                                flags: MoveFlags::IS_PAWN_MOVE | MoveFlags::IS_CAPTURE | *p,
+                            });
+                        }
+                    } else {
+                        candidate_moves.push(Move {
+                            from: (8 * y + x) as u8,
+                            to: (8 * (y + dy) + x + dx) as u8,
+                            flags: MoveFlags::IS_PAWN_MOVE | MoveFlags::IS_CAPTURE,
+                        });
+                    }
                 }
             }
+
             // en passant
-            if let (Some(piece),Some(m))  = (self.get_square(x + dx, y), self.earlier_moves.last()) {
-                if piece == enemy_pawn
-                && m.from as i32== 8 * (y - 2 * dy)+ x+ dx &&m.to as i32 == 8*y+x+dx
-                {
-                    candidate_moves.push(Move {
-                        from: (8 * y + x) as u8,
-                        to: (8 * (y + dy) + x + dx) as u8,
-                        flags: MoveFlags::IS_CAPTURE | MoveFlags::IS_PAWN_MOVE,
-                    });
-                }
-            }
-        }
-        // Moving forward
-        if let Some(piece) = self.get_square(x, y + dy) {
-            if piece == Empty {
+            if self.position_flags.contains(PositionFlags::CAN_EN_PASSANT)
+                && y - dy % 5 == 2
+                && (PositionFlags::EN_PASSANT_FILE_MASK & self.position_flags).bits >> 5
+                    == (x + dx) as u8
+            {
                 candidate_moves.push(Move {
                     from: (8 * y + x) as u8,
-                    to: (8 * (y + dy) + x) as u8,
-                    flags: MoveFlags::IS_PAWN_MOVE,
+                    to: (8 * (y + dy) + x + dx) as u8,
+                    flags: MoveFlags::IS_CAPTURE | MoveFlags::IS_PAWN_MOVE,
                 });
-                if let Some(piece) = self.get_square(x, y + 2 * dy) {
-                    if piece == Empty && y % 5 == 1 {
+            }
+        }
+        // moving forward
+        if let Some(piece1) = self.get_square(x, y + dy) {
+            if piece1 == Empty {
+                if (y + dy) % 7 == 0 {
+                    println!("promotion");
+                    for p in [
+                        MoveFlags::PROMOTE_TO_QUEEN,
+                        MoveFlags::PROMOTE_TO_ROOK,
+                        MoveFlags::PROMOTE_TO_BISHOP,
+                        MoveFlags::PROMOTE_TO_KNIGHT,
+                    ]
+                    .iter()
+                    {
+                        candidate_moves.push(Move {
+                            from: (8 * y + x) as u8,
+                            to: (8 * (y + dy) + x) as u8,
+                            flags: MoveFlags::IS_PAWN_MOVE | *p,
+                        });
+                    }
+                } else {
+                    candidate_moves.push(Move {
+                        from: (8 * y + x) as u8,
+                        to: (8 * (y + dy) + x) as u8,
+                        flags: MoveFlags::IS_PAWN_MOVE,
+                    });
+                }
+                if let Some(piece2) = self.get_square(x, y + 2 * dy) {
+                    if piece2 == Empty && y % 5 == 1 {
                         candidate_moves.push(Move {
                             from: (8 * y + x) as u8,
                             to: (8 * (y + 2 * dy) + x) as u8,
@@ -833,7 +845,7 @@ impl Position {
 impl fmt::Display for Position {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         let mut text = String::new();
-        for y in 0..8 {
+        for y in (0..8).rev() {
             for x in 0..8 {
                 text += &format!(
                     "{} ",
