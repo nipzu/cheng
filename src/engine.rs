@@ -5,7 +5,6 @@ use crate::position::{Move, Position, Square, Square::*};
 
 pub struct Engine {
     game_tree: Vec<Position>,
-    last_capture_or_pawn_move: usize,
     nodes_searched: usize,
     root_node: usize,
     depth: usize,
@@ -25,7 +24,6 @@ impl Engine {
             game_tree: vec![Position::new()],
             depth: 0,
             nodes_searched: 0,
-            last_capture_or_pawn_move: 0,
             root_node: 0,
         }
     }
@@ -36,11 +34,7 @@ impl Engine {
 
     pub fn set_game_tree(&mut self, move_iter: &mut dyn Iterator<Item = Move>) {
         self.game_tree = vec![Position::new()];
-        self.last_capture_or_pawn_move = 0;
         for next_move in move_iter {
-            if next_move.resets_draw_counters() {
-                self.last_capture_or_pawn_move = self.game_tree.len() - 1;
-            }
             let mut next_position = self.game_tree.last().unwrap().clone();
             next_position.make_move(next_move);
             self.game_tree.push(next_position);
@@ -81,6 +75,31 @@ impl Engine {
             );
         }
 
+        let mut num_same_boards = 1;
+        for i in self
+            .game_tree
+            .iter()
+            .enumerate()
+            .rev()
+            .take_while(|(_, pos)| !pos.resets_draw_counters())
+            .map(|(i, _)| i)
+        {
+            if self.game_tree[i - 1] == *self.game_tree.last().unwrap() {
+                num_same_boards += 1;
+            }
+            if self.game_tree.len() - i >= 100 {
+                return (None, 0.0);
+            }
+            // cant be reached more than once
+            if num_same_boards >= 3
+                && (!self.game_tree[i - 1].can_en_passant()
+                    || self.game_tree[i - 1].get_possible_moves().len()
+                        == self.game_tree.last().unwrap().get_possible_moves().len())
+            {
+                return (None, 0.0);
+            }
+        }
+
         let possible_moves = self.game_tree.last().unwrap().get_possible_moves();
 
         if possible_moves.is_empty() {
@@ -95,18 +114,7 @@ impl Engine {
             };
         }
 
-        if self.game_tree.len() - self.last_capture_or_pawn_move > 101
-            || self.game_tree.last().unwrap().is_insufficient_material()
-            || self
-                .game_tree
-                .iter()
-                .skip(self.last_capture_or_pawn_move)
-                .rev()
-                .skip(1)
-                .filter(|pos| *pos == self.game_tree.last().unwrap())
-                .count()
-                > 1
-        {
+        if self.game_tree.last().unwrap().is_insufficient_material() {
             return (None, 0.0);
         }
 
@@ -160,7 +168,7 @@ impl Engine {
 
 impl fmt::Debug for Engine {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        writeln!(f, "{}", self.game_tree[self.root_node])?;
+        writeln!(f, "{:?}", self.game_tree[self.root_node])?;
         writeln!(f, "possible moves:")?;
         for possible_move in self.game_tree[self.root_node].get_possible_moves() {
             writeln!(f, "{}", possible_move)?;

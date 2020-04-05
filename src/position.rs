@@ -5,57 +5,63 @@ use bitflags::bitflags;
 #[derive(Clone)]
 pub struct Position {
     squares: [Square; 64],
-    is_white_turn: bool,
     position_flags: PositionFlags,
 }
 
 impl PartialEq for Position {
     fn eq(&self, other: &Position) -> bool {
-        self.is_white_turn == other.is_white_turn
-            && self
-                .squares
-                .iter()
-                .zip(other.squares.iter())
-                .all(|(a, b)| a == b)
-            && self.position_flags.bits & 0b0001_1110 == other.position_flags.bits & 0b0001_1110
-            && if self.position_flags.contains(PositionFlags::CAN_EN_PASSANT)
-                || other.position_flags.contains(PositionFlags::CAN_EN_PASSANT)
+        self.squares
+            .iter()
+            .zip(other.squares.iter())
+            .all(|(a, b)| a == b)
+            && self.position_flags & PositionFlags::COMPARE_FLAGS
+                == other.position_flags & PositionFlags::COMPARE_FLAGS
+        /*&& if self.position_flags.contains(PositionFlags::CAN_EN_PASSANT)
+            || other.position_flags.contains(PositionFlags::CAN_EN_PASSANT)
+        {
+            for coords in [
+                self.find_pieces(WhitePawn),
+                self.find_pieces(BlackPawn),
+            ]
+            .iter()
             {
-                for (coords, dy) in [
-                    (self.find_pieces(WhitePawn), 1),
-                    (self.find_pieces(BlackPawn), -1),
-                ]
-                .iter()
-                {
-                    // en passant
-                    for (x, y) in coords {
-                        for dx in [-1, 1].iter() {
-                            if y - dy % 5 == 2
-                                && (PositionFlags::EN_PASSANT_FILE_MASK & self.position_flags).bits
-                                    >> 5
-                                    == (x + dx) as u8
-                            {
-                                return false;
-                            }
+                // en passant
+                for (x, y) in coords {
+                    for dx in [-1, 1].iter() {
+                        if *y == if self.is_white_turn() { 4 } else { 3 }
+                            && ((self.position_flags & PositionFlags::EN_PASSANT_FILE_MASK)
+                                .bits
+                                == (x + dx) as u16
+                                || (other.position_flags & PositionFlags::EN_PASSANT_FILE_MASK)
+                                    .bits
+                                    == (x + dx) as u16)
+                        {
+                            return false;
                         }
                     }
                 }
-                true
-            } else {
-                true
             }
+            true
+        } else {
+            true
+        }*/
     }
 }
 
 bitflags! {
-    struct PositionFlags: u8 {
-        const CAN_EN_PASSANT             = 0b0000_0001;
-        const CAN_WHITE_CASTLE_KINGSIDE  = 0b0000_0010;
-        const CAN_BLACK_CASTLE_KINGSIDE  = 0b0000_0100;
-        const CAN_WHITE_CASTLE_QUEENSIDE = 0b0000_1000;
-        const CAN_BLACK_CASTLE_QUEENSIDE = 0b0001_0000;
-        const STARTING_POS               = 0b0001_1110;
-        const EN_PASSANT_FILE_MASK       = 0b1110_0000;
+    struct PositionFlags: u16 {
+        const CAN_EN_PASSANT             = 0b0000_0000_0000_1000;
+        const EN_PASSANT_FILE_MASK       = 0b0000_0000_0000_0111;
+        const CAN_WHITE_CASTLE_KINGSIDE  = 0b0000_0000_0001_0000;
+        const CAN_BLACK_CASTLE_KINGSIDE  = 0b0000_0000_0010_0000;
+        const CAN_WHITE_CASTLE_QUEENSIDE = 0b0000_0000_0100_0000;
+        const CAN_BLACK_CASTLE_QUEENSIDE = 0b0000_0000_1000_0000;
+        const IS_WHITE_TURN              = 0b0000_0001_0000_0000;
+        const RESETS_DRAW_COUNTERS       = 0b0000_0010_0000_0000;
+        const IS_CHECK                   = 0b0000_0100_0000_0000;
+        const NOT_EN_PASSANT_BITS        = 0b1111_1111_1111_0000;
+        const COMPARE_FLAGS              = 0b0000_0101_1111_0000;
+        const STARTING_POS               = 0b0000_0011_1111_0000;
     }
 }
 
@@ -89,13 +95,14 @@ impl Square {
 
 bitflags! {
     pub struct MoveFlags: u8 {
-        const IS_PAWN_MOVE      = 0b0000_0001;
-        const IS_CAPTURE        = 0b0000_0010;
-        const PROMOTE_TO_QUEEN  = 0b0000_0101;
-        const PROMOTE_TO_ROOK   = 0b0000_1001;
-        const PROMOTE_TO_BISHOP = 0b0001_0001;
-        const PROMOTE_TO_KNIGHT = 0b0010_0001;
-        const FLAGS_UNKNOWN     = 0b1000_0000;
+        const IS_PAWN_MOVE         = 0b0000_0001;
+        const IS_CAPTURE           = 0b0000_0010;
+        const FLAGS_UNKNOWN        = 0b0000_0100;
+        const PROMOTE_TO_QUEEN     = 0b0001_0000;
+        const PROMOTE_TO_ROOK      = 0b0010_0000;
+        const PROMOTE_TO_BISHOP    = 0b0100_0000;
+        const PROMOTE_TO_KNIGHT    = 0b1000_0000;
+        const PROMOTION_PIECE_MASK = 0b1111_0000;
     }
 }
 
@@ -103,7 +110,7 @@ bitflags! {
 pub struct Move {
     from: u8,
     to: u8,
-    flags: MoveFlags,
+    move_flags: MoveFlags,
 }
 
 impl Move {
@@ -114,18 +121,17 @@ impl Move {
         let to_x = bytes.next().unwrap() - 97;
         let to_y = bytes.next().unwrap() - 49;
 
-        let mut flags = MoveFlags::FLAGS_UNKNOWN;
+        let mut move_flags = MoveFlags::FLAGS_UNKNOWN;
         if let Some(b) = bytes.next() {
-            // why tf doesnt it let it just panic
             match b {
-                b'q' => flags = MoveFlags::PROMOTE_TO_QUEEN,
-                b'r' => flags = MoveFlags::PROMOTE_TO_ROOK,
-                b'b' => flags = MoveFlags::PROMOTE_TO_BISHOP,
-                b'n' => flags = MoveFlags::PROMOTE_TO_KNIGHT,
+                b'q' => move_flags = MoveFlags::PROMOTE_TO_QUEEN,
+                b'r' => move_flags = MoveFlags::PROMOTE_TO_ROOK,
+                b'b' => move_flags = MoveFlags::PROMOTE_TO_BISHOP,
+                b'n' => move_flags = MoveFlags::PROMOTE_TO_KNIGHT,
                 _ => panic!("invalid promotion"),
             };
-            flags |= MoveFlags::IS_PAWN_MOVE;
-            flags |= if from_y != to_y {
+            move_flags |= MoveFlags::IS_PAWN_MOVE;
+            move_flags |= if from_y != to_y {
                 MoveFlags::IS_CAPTURE
             } else {
                 MoveFlags::empty()
@@ -135,12 +141,13 @@ impl Move {
         Move {
             from: 8 * from_y + from_x,
             to: 8 * to_y + to_x,
-            flags,
+            move_flags,
         }
     }
 
     pub fn resets_draw_counters(&self) -> bool {
-        self.flags.contains(MoveFlags::IS_PAWN_MOVE) || self.flags.contains(MoveFlags::IS_CAPTURE)
+        self.move_flags.contains(MoveFlags::IS_PAWN_MOVE)
+            || self.move_flags.contains(MoveFlags::IS_CAPTURE)
     }
 }
 
@@ -151,13 +158,14 @@ impl fmt::Display for Move {
         let from_rank = self.from / 8 + 1;
         let to_file = FILES[(self.to % 8) as usize];
         let to_rank = self.to / 8 + 1;
-        let promote_to = match (self.flags.bits() >> 2).trailing_zeros() {
-            0 => "q",
-            1 => "r",
-            2 => "b",
-            3 => "n",
+        let promote_to = match self.move_flags & MoveFlags::PROMOTION_PIECE_MASK {
+            MoveFlags::PROMOTE_TO_QUEEN => "q",
+            MoveFlags::PROMOTE_TO_ROOK => "r",
+            MoveFlags::PROMOTE_TO_BISHOP => "b",
+            MoveFlags::PROMOTE_TO_KNIGHT => "n",
             _ => "",
         };
+
         write!(
             f,
             "{}{}{}{}{}",
@@ -194,7 +202,6 @@ impl Position {
         Position {
             squares,
             position_flags: PositionFlags::STARTING_POS,
-            is_white_turn: true,
         }
     }
 
@@ -238,6 +245,10 @@ impl Position {
         false
     }
 
+    pub fn can_en_passant(&self) -> bool {
+        self.position_flags.contains(PositionFlags::CAN_EN_PASSANT)
+    }
+
     pub fn is_check(&self) -> bool {
         self.is_in_check(self.is_white_turn())
     }
@@ -246,10 +257,7 @@ impl Position {
         let own_king = if is_white { WhiteKing } else { BlackKing };
         let own_kings = self.find_pieces(own_king);
 
-        if own_kings.len() != 1 {
-            println!("{}", self);
-            panic!();
-        }
+        assert_eq!(own_kings.len(), 1);
 
         let (x, y) = own_kings[0];
 
@@ -270,22 +278,24 @@ impl Position {
     }
 
     fn get_unknown_flags(&self, m: &mut Move) {
-        m.flags.bits = 0;
+        m.move_flags = MoveFlags::empty();
 
+        // promotion is handled in from_notation
         // ignore en passant for now
         if self.squares[m.to as usize] != Empty {
-            m.flags |= MoveFlags::IS_CAPTURE;
+            m.move_flags |= MoveFlags::IS_CAPTURE;
         }
 
         if self.squares[m.from as usize] == WhitePawn || self.squares[m.from as usize] == BlackPawn
         {
-            m.flags |= MoveFlags::IS_PAWN_MOVE;
+            m.move_flags |= MoveFlags::IS_PAWN_MOVE;
         }
-        // promotion is handled in from_notation
     }
 
     pub fn make_move(&mut self, mut m: Move) {
-        if m.flags.contains(MoveFlags::FLAGS_UNKNOWN) {
+        assert_ne!(m.from, m.to);
+
+        if m.move_flags.contains(MoveFlags::FLAGS_UNKNOWN) {
             self.get_unknown_flags(&mut m);
         }
 
@@ -304,7 +314,7 @@ impl Position {
                     .contains(PositionFlags::CAN_WHITE_CASTLE_QUEENSIDE),
                 58 => self
                     .position_flags
-                    .contains(PositionFlags::CAN_WHITE_CASTLE_QUEENSIDE),
+                    .contains(PositionFlags::CAN_BLACK_CASTLE_QUEENSIDE),
                 _ => false,
             }
         {
@@ -320,41 +330,46 @@ impl Position {
         }
 
         if m.from == 4 {
-            self.position_flags -= PositionFlags::CAN_WHITE_CASTLE_KINGSIDE;
-            self.position_flags -= PositionFlags::CAN_WHITE_CASTLE_QUEENSIDE;
+            self.position_flags
+                .remove(PositionFlags::CAN_WHITE_CASTLE_KINGSIDE);
+            self.position_flags
+                .remove(PositionFlags::CAN_WHITE_CASTLE_QUEENSIDE);
         }
 
         if m.from == 60 {
-            self.position_flags -= PositionFlags::CAN_BLACK_CASTLE_KINGSIDE;
-            self.position_flags -= PositionFlags::CAN_BLACK_CASTLE_QUEENSIDE;
+            self.position_flags
+                .remove(PositionFlags::CAN_BLACK_CASTLE_KINGSIDE);
+            self.position_flags
+                .remove(PositionFlags::CAN_BLACK_CASTLE_QUEENSIDE);
         }
 
         if m.from == 0 || m.to == 0 {
-            self.position_flags -= PositionFlags::CAN_WHITE_CASTLE_QUEENSIDE;
+            self.position_flags
+                .remove(PositionFlags::CAN_WHITE_CASTLE_QUEENSIDE);
         }
 
         if m.from == 7 || m.to == 7 {
-            self.position_flags -= PositionFlags::CAN_WHITE_CASTLE_KINGSIDE;
+            self.position_flags
+                .remove(PositionFlags::CAN_WHITE_CASTLE_KINGSIDE);
         }
 
         if m.from == 56 || m.to == 56 {
-            self.position_flags -= PositionFlags::CAN_BLACK_CASTLE_QUEENSIDE;
+            self.position_flags
+                .remove(PositionFlags::CAN_BLACK_CASTLE_QUEENSIDE);
         }
 
         if m.from == 63 || m.to == 63 {
-            self.position_flags -= PositionFlags::CAN_BLACK_CASTLE_KINGSIDE;
+            self.position_flags
+                .remove(PositionFlags::CAN_BLACK_CASTLE_KINGSIDE);
         }
 
-        if self.squares[m.to as usize] == WhiteKing || self.squares[m.to as usize] == BlackKing {
-            println!("{}", self);
-            println!("{}, {}", m.to, m.from);
-            println!("{:#b}", self.position_flags.bits);
-            panic!()
-        }
+        assert!(
+            !(self.squares[m.to as usize] == WhiteKing || self.squares[m.to as usize] == BlackKing)
+        );
 
         // check en passant square
-        if m.flags.contains(MoveFlags::IS_PAWN_MOVE)
-            && !m.flags.contains(MoveFlags::IS_CAPTURE)
+        if m.move_flags.contains(MoveFlags::IS_PAWN_MOVE)
+            && !m.move_flags.contains(MoveFlags::IS_CAPTURE)
             && m.from % 8 != m.to % 8
         {
             self.squares[(m.to as i32 + if self.is_white_turn() { -8 } else { 8 }) as usize] =
@@ -365,16 +380,16 @@ impl Position {
         self.squares[m.to as usize] = self.squares[m.from as usize];
         self.squares[m.from as usize] = Empty;
         // clear en passant bits
-        self.position_flags.bits &= 0b0001_1110;
+        self.position_flags &= PositionFlags::NOT_EN_PASSANT_BITS;
 
         if (self.squares[m.to as usize] == WhitePawn || self.squares[m.to as usize] == BlackPawn)
             && ((m.from as i32 / 8) - (m.to as i32 / 8)).abs() == 2
         {
             self.position_flags |= PositionFlags::CAN_EN_PASSANT;
-            self.position_flags.bits |= m.from << 5;
+            self.position_flags.bits |= (m.from % 8) as u16;
         }
 
-        if m.flags.contains(MoveFlags::PROMOTE_TO_QUEEN) {
+        if m.move_flags.contains(MoveFlags::PROMOTE_TO_QUEEN) {
             self.squares[m.to as usize] = if self.is_white_turn() {
                 WhiteQueen
             } else {
@@ -382,21 +397,21 @@ impl Position {
             };
         }
 
-        if m.flags.contains(MoveFlags::PROMOTE_TO_ROOK) {
+        if m.move_flags.contains(MoveFlags::PROMOTE_TO_ROOK) {
             self.squares[m.to as usize] = if self.is_white_turn() {
                 WhiteRook
             } else {
                 BlackRook
             };
         }
-        if m.flags.contains(MoveFlags::PROMOTE_TO_BISHOP) {
+        if m.move_flags.contains(MoveFlags::PROMOTE_TO_BISHOP) {
             self.squares[m.to as usize] = if self.is_white_turn() {
                 WhiteBishop
             } else {
                 BlackBishop
             };
         }
-        if m.flags.contains(MoveFlags::PROMOTE_TO_KNIGHT) {
+        if m.move_flags.contains(MoveFlags::PROMOTE_TO_KNIGHT) {
             self.squares[m.to as usize] = if self.is_white_turn() {
                 WhiteKnight
             } else {
@@ -404,7 +419,16 @@ impl Position {
             };
         }
 
-        self.is_white_turn = !self.is_white_turn;
+        self.position_flags.set(
+            PositionFlags::RESETS_DRAW_COUNTERS,
+            m.resets_draw_counters(),
+        );
+        self.position_flags.toggle(PositionFlags::IS_WHITE_TURN);
+    }
+
+    pub fn resets_draw_counters(&self) -> bool {
+        self.position_flags
+            .contains(PositionFlags::RESETS_DRAW_COUNTERS)
     }
 
     pub fn get_possible_moves(&self) -> Vec<Move> {
@@ -418,7 +442,7 @@ impl Position {
     }
 
     pub fn is_white_turn(&self) -> bool {
-        self.is_white_turn
+        self.position_flags.contains(PositionFlags::IS_WHITE_TURN)
     }
 
     fn get_candidate_moves(&self) -> impl Iterator<Item = Move> + '_ {
@@ -465,14 +489,14 @@ impl Position {
                             candidate_moves.push(Move {
                                 from: (8 * y + x) as u8,
                                 to: (8 * (y + dy) + x + dx) as u8,
-                                flags: MoveFlags::IS_PAWN_MOVE | MoveFlags::IS_CAPTURE | *p,
+                                move_flags: MoveFlags::IS_PAWN_MOVE | MoveFlags::IS_CAPTURE | *p,
                             });
                         }
                     } else {
                         candidate_moves.push(Move {
                             from: (8 * y + x) as u8,
                             to: (8 * (y + dy) + x + dx) as u8,
-                            flags: MoveFlags::IS_PAWN_MOVE | MoveFlags::IS_CAPTURE,
+                            move_flags: MoveFlags::IS_PAWN_MOVE | MoveFlags::IS_CAPTURE,
                         });
                     }
                 }
@@ -480,14 +504,15 @@ impl Position {
 
             // en passant
             if self.position_flags.contains(PositionFlags::CAN_EN_PASSANT)
-                && y - dy % 5 == 2
-                && (PositionFlags::EN_PASSANT_FILE_MASK & self.position_flags).bits >> 5
-                    == (x + dx) as u8
+                && y == if self.is_white_turn() { 4 } else { 3 }
+                && (PositionFlags::EN_PASSANT_FILE_MASK & self.position_flags).bits
+                    == (x + dx) as u16
             {
                 candidate_moves.push(Move {
                     from: (8 * y + x) as u8,
                     to: (8 * (y + dy) + x + dx) as u8,
-                    flags: MoveFlags::IS_CAPTURE | MoveFlags::IS_PAWN_MOVE,
+                    // do not set IS_CAPTURE
+                    move_flags: MoveFlags::IS_PAWN_MOVE,
                 });
             }
         }
@@ -495,7 +520,6 @@ impl Position {
         if let Some(piece1) = self.get_square(x, y + dy) {
             if piece1 == Empty {
                 if (y + dy) % 7 == 0 {
-                    println!("promotion");
                     for p in [
                         MoveFlags::PROMOTE_TO_QUEEN,
                         MoveFlags::PROMOTE_TO_ROOK,
@@ -507,14 +531,14 @@ impl Position {
                         candidate_moves.push(Move {
                             from: (8 * y + x) as u8,
                             to: (8 * (y + dy) + x) as u8,
-                            flags: MoveFlags::IS_PAWN_MOVE | *p,
+                            move_flags: MoveFlags::IS_PAWN_MOVE | *p,
                         });
                     }
                 } else {
                     candidate_moves.push(Move {
                         from: (8 * y + x) as u8,
                         to: (8 * (y + dy) + x) as u8,
-                        flags: MoveFlags::IS_PAWN_MOVE,
+                        move_flags: MoveFlags::IS_PAWN_MOVE,
                     });
                 }
                 if let Some(piece2) = self.get_square(x, y + 2 * dy) {
@@ -522,7 +546,7 @@ impl Position {
                         candidate_moves.push(Move {
                             from: (8 * y + x) as u8,
                             to: (8 * (y + 2 * dy) + x) as u8,
-                            flags: MoveFlags::IS_PAWN_MOVE,
+                            move_flags: MoveFlags::IS_PAWN_MOVE,
                         });
                     }
                 }
@@ -551,13 +575,13 @@ impl Position {
                     candidate_moves.push(Move {
                         from: (8 * y + x) as u8,
                         to: (8 * (y + dy) + x + dx) as u8,
-                        flags: MoveFlags::empty(),
+                        move_flags: MoveFlags::empty(),
                     });
                 } else if piece.is_white() != self.is_white_turn() {
                     candidate_moves.push(Move {
                         from: (8 * y + x) as u8,
                         to: (8 * (y + dy) + x + dx) as u8,
-                        flags: MoveFlags::IS_CAPTURE,
+                        move_flags: MoveFlags::IS_CAPTURE,
                     });
                 }
             }
@@ -576,13 +600,13 @@ impl Position {
                         candidate_moves.push(Move {
                             from: (8 * y + x) as u8,
                             to: (8 * (y + dy) + x + dx) as u8,
-                            flags: MoveFlags::empty(),
+                            move_flags: MoveFlags::empty(),
                         });
                     } else if piece.is_white() != self.is_white_turn() {
                         candidate_moves.push(Move {
                             from: (8 * y + x) as u8,
                             to: (8 * (y + dy) + x + dx) as u8,
-                            flags: MoveFlags::IS_CAPTURE,
+                            move_flags: MoveFlags::IS_CAPTURE,
                         });
                     }
                 }
@@ -600,20 +624,18 @@ impl Position {
                     .position_flags
                     .contains(PositionFlags::CAN_BLACK_CASTLE_KINGSIDE)))
             && !self.is_in_check(self.is_white_turn())
+            && self.squares[8 * y as usize + 5] == Empty
+            && self.squares[8 * y as usize + 6] == Empty
         {
             let mut test_check_5 = self.clone();
-            let mut test_check_6 = self.clone();
             test_check_5.squares[8 * y as usize + 5] = test_check_5.squares[8 * y as usize + 4];
             test_check_5.squares[8 * y as usize + 4] = Empty;
-            test_check_6.squares[8 * y as usize + 6] = test_check_6.squares[8 * y as usize + 4];
-            test_check_6.squares[8 * y as usize + 4] = Empty;
-            if !test_check_5.is_in_check(self.is_white_turn())
-                && !test_check_6.is_in_check(self.is_white_turn())
-            {
+
+            if !test_check_5.is_in_check(self.is_white_turn()) {
                 candidate_moves.push(Move {
                     from: (8 * y + x) as u8,
                     to: (8 * y + x + 2) as u8,
-                    flags: MoveFlags::empty(),
+                    move_flags: MoveFlags::empty(),
                 });
             }
         }
@@ -627,6 +649,9 @@ impl Position {
                     .position_flags
                     .contains(PositionFlags::CAN_BLACK_CASTLE_QUEENSIDE)))
             && !self.is_in_check(self.is_white_turn())
+            && self.squares[8 * y as usize + 1] == Empty
+            && self.squares[8 * y as usize + 2] == Empty
+            && self.squares[8 * y as usize + 3] == Empty
         {
             let mut test_check_3 = self.clone();
             let mut test_check_2 = self.clone();
@@ -640,7 +665,7 @@ impl Position {
                 candidate_moves.push(Move {
                     from: (8 * y + x) as u8,
                     to: (8 * y + x - 2) as u8,
-                    flags: MoveFlags::empty(),
+                    move_flags: MoveFlags::empty(),
                 });
             }
         }
@@ -670,13 +695,13 @@ impl Position {
                         candidate_moves.push(Move {
                             from: (8 * y + x) as u8,
                             to: (8 * dy + dx) as u8,
-                            flags: MoveFlags::empty(),
+                            move_flags: MoveFlags::empty(),
                         });
                     } else if piece.is_white() != self.is_white_turn() {
                         candidate_moves.push(Move {
                             from: (8 * y + x) as u8,
                             to: (8 * dy + dx) as u8,
-                            flags: MoveFlags::IS_CAPTURE,
+                            move_flags: MoveFlags::IS_CAPTURE,
                         });
                         break;
                     } else {
@@ -703,13 +728,13 @@ impl Position {
                         candidate_moves.push(Move {
                             from: (8 * y + x) as u8,
                             to: (8 * dy + dx) as u8,
-                            flags: MoveFlags::empty(),
+                            move_flags: MoveFlags::empty(),
                         });
                     } else if piece.is_white() != self.is_white_turn() {
                         candidate_moves.push(Move {
                             from: (8 * y + x) as u8,
                             to: (8 * dy + dx) as u8,
-                            flags: MoveFlags::IS_CAPTURE,
+                            move_flags: MoveFlags::IS_CAPTURE,
                         });
                         break;
                     } else {
@@ -839,6 +864,13 @@ impl Position {
             }
         }
         false
+    }
+}
+
+impl fmt::Debug for Position {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        writeln!(f, "{}", self)?;
+        writeln!(f, "{:#b}", self.position_flags.bits)
     }
 }
 
