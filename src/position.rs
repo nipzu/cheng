@@ -278,7 +278,7 @@ impl Position {
         }
     }
 
-    pub fn make_move(&mut self, mut m: Move) {
+    pub fn make_move(&mut self, mut m: Move) -> bool{
         assert_ne!(m.from, m.to);
 
         if m.move_flags.contains(MoveFlags::FLAGS_UNKNOWN) {
@@ -410,6 +410,8 @@ impl Position {
             m.resets_draw_counters(),
         );
         self.position_flags.toggle(PositionFlags::IS_WHITE_TURN);
+        
+        !self.is_in_check(!self.is_white_turn())
     }
 
     pub fn resets_draw_counters(&self) -> bool {
@@ -419,12 +421,6 @@ impl Position {
 
     pub fn is_white_turn(&self) -> bool {
         self.position_flags.contains(PositionFlags::IS_WHITE_TURN)
-    }
-
-    pub fn is_legal_move(&self, cand_move: Move) -> bool {
-        let mut next_position = self.clone();
-        next_position.make_move(cand_move);
-        !next_position.is_in_check(self.is_white_turn())
     }
 
     pub fn get_candidate_moves(&self, candidate_moves_buffer: &mut Vec<Move>) {

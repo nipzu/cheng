@@ -55,12 +55,12 @@ fn handle_uci() {
                 if let Some(best_move) = best_move {
                     let nps = (nodes_searched as f64 / search_time.as_secs_f64()) as usize;
                     println!(
-                        "info depth {} nodes {} nps {} time {} score cp {} pv {}",
+                        "info depth {} nodes {} nps {} time {} score {} pv {}",
                         search_depth,
                         nodes_searched,
                         nps,
                         search_time.as_millis(),
-                        (evaluation * 100.0).round() as i32,
+                        evaluation,
                         best_move
                     );
                     println!("bestmove {}", best_move);

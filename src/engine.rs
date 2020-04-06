@@ -10,12 +10,65 @@ pub struct Engine {
     depth: usize,
 }
 
+#[derive(PartialEq)]
+pub enum Evaluation {
+    Heuristic(f64),
+    MateIn(i32),
+}
+
+impl Evaluation {
+    pub fn increase_mate_dist(&mut self) {
+        if let Evaluation::MateIn(dist) = self {
+            *dist += dist.signum();
+        }
+    }
+}
+
+impl fmt::Display for Evaluation {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            Evaluation::Heuristic(eval) => write!(f, "cp {}", (eval * 100.0).round() as i32),
+            Evaluation::MateIn(dist) => {
+                let half_move_dist = dist - 2 * dist.signum();
+                write!(f, "mate {}", half_move_dist / 2 + half_move_dist % 2)
+            },
+        }
+    }
+}
+
+impl std::ops::Neg for Evaluation {
+    type Output = Evaluation;
+    fn neg(self) -> Self::Output {
+        match self {
+            Evaluation::Heuristic(eval) => Evaluation::Heuristic(-eval),
+            Evaluation::MateIn(dist) => Evaluation::MateIn(-dist),
+        }
+    }
+}
+
+impl PartialOrd for Evaluation {
+    fn partial_cmp(&self, other: &Evaluation) -> Option<std::cmp::Ordering> {
+        match (self, other) {
+            (Evaluation::MateIn(s), Evaluation::MateIn(o)) => {
+                if s.signum() == o.signum() {
+                    o.abs().partial_cmp(&s.abs())
+                } else {
+                    Some(s.cmp(&o))
+                }
+            },
+            (Evaluation::Heuristic(s), Evaluation::Heuristic(o)) => s.partial_cmp(o),
+            (Evaluation::MateIn(s), Evaluation::Heuristic(_)) => Some(s.cmp(&0)),
+            (Evaluation::Heuristic(_), Evaluation::MateIn(o)) => Some(0.cmp(o)),
+        }
+    }
+}
+
 pub struct SearchOutput {
     pub best_move: Option<Move>,
     pub nodes_searched: usize,
     pub search_time: Duration,
     pub search_depth: usize,
-    pub evaluation: f64,
+    pub evaluation: Evaluation,
 }
 
 impl Engine {
@@ -51,12 +104,8 @@ impl Engine {
         }
 
         let start_time = Instant::now();
-        let (best_move, mut evaluation) = self.min_max_search(&mut candidate_moves_buffer);
+        let (best_move, evaluation) = self.min_max_search(&mut candidate_moves_buffer);
         let end_time = Instant::now();
-
-        if !self.game_tree[self.root_node].is_white_turn() {
-            evaluation *= -1.0;
-        }
 
         let search_time = end_time - start_time;
         SearchOutput {
@@ -68,17 +117,26 @@ impl Engine {
         }
     }
 
-    fn min_max_search(&mut self, candidate_moves_buffer: &mut [Vec<Move>]) -> (Option<Move>, f64) {
+    fn min_max_search(
+        &mut self,
+        candidate_moves_buffer: &mut [Vec<Move>],
+    ) -> (Option<Move>, Evaluation) {
         self.nodes_searched += 1;
 
         let cur_depth = self.game_tree.len() - self.root_node - 1;
 
         assert!(cur_depth <= self.depth);
 
+        let is_white_turn = self.game_tree.last().unwrap().is_white_turn();
+
         if cur_depth == self.depth {
             return (
                 None,
-                Self::heuristic_evaluation(self.game_tree.last().unwrap().get_squares()),
+                if is_white_turn {
+                    Self::heuristic_evaluation(self.game_tree.last().unwrap().get_squares())
+                } else {
+                    -Self::heuristic_evaluation(self.game_tree.last().unwrap().get_squares())
+                }
             );
         }
 
@@ -95,16 +153,16 @@ impl Engine {
                 num_same_boards += 1;
             }
             if self.game_tree.len() - i >= 100 {
-                return (None, 0.0);
+                return (None, Evaluation::Heuristic(0.0));
             }
             // cant be reached more than once
             if num_same_boards >= 3 && !self.game_tree[i - 1].can_en_passant() {
-                return (None, 0.0);
+                return (None, Evaluation::Heuristic(0.0));
             }
         }
 
         if self.game_tree.last().unwrap().is_insufficient_material() {
-            return (None, 0.0);
+            return (None, Evaluation::Heuristic(0.0));
         }
 
         candidate_moves_buffer[0].clear();
@@ -115,46 +173,37 @@ impl Engine {
 
         let (move_buffer, candidate_moves_buffer) =
             candidate_moves_buffer.split_first_mut().unwrap();
-        let is_white_turn = self.game_tree.last().unwrap().is_white_turn();
-
 
         self.game_tree.push(self.game_tree.last().unwrap().clone());
-        let best_move = move_buffer
+
+        let mut best_move = move_buffer
             .iter()
             .filter_map(|m| {
-                if self.game_tree[self.game_tree.len() - 2].is_legal_move(*m) {
-                    *self.game_tree.last_mut().unwrap() =
-                        self.game_tree[self.game_tree.len() - 2].clone();
-                    self.game_tree.last_mut().unwrap().make_move(*m);
-                    Some((Some(*m), self.min_max_search(candidate_moves_buffer).1))
+                *self.game_tree.last_mut().unwrap() =
+                self.game_tree[self.game_tree.len() - 2].clone();
+                if self.game_tree.last_mut().unwrap().make_move(*m) {
+                    let (_, eval) = self.min_max_search(candidate_moves_buffer);
+                    Some((Some(*m),  -eval ))
                 } else {
                     None
                 }
             })
-            .max_by(|a, b| {
-                if is_white_turn {
-                    a.1.partial_cmp(&b.1).unwrap()
-                } else {
-                    b.1.partial_cmp(&a.1).unwrap()
-                }
-            })
+            .max_by(|a, b| a.1.partial_cmp(&b.1).unwrap())
             .unwrap_or_else(|| {
                 if self.game_tree[self.game_tree.len() - 2].is_check() {
-                    if is_white_turn {
-                        (None, std::f64::NEG_INFINITY)
-                    } else {
-                        (None, std::f64::INFINITY)
-                    }
+                    (None, Evaluation::MateIn(if is_white_turn { -1 } else { 1 }))
                 } else {
-                    (None, 0.0)
+                    (None, Evaluation::Heuristic(0.0))
                 }
             });
         self.game_tree.pop();
 
+        best_move.1.increase_mate_dist();
+
         best_move
     }
 
-    fn heuristic_evaluation(position: &[Square; 64]) -> f64 {
+    fn heuristic_evaluation(position: &[Square; 64]) -> Evaluation {
         let mut material_score = 0.0;
 
         for (i, piece) in position.iter().enumerate() {
@@ -174,7 +223,7 @@ impl Engine {
                 BlackQueen => -9.0,
             }
         }
-        material_score
+        Evaluation::Heuristic(material_score)
     }
 }
 
