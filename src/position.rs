@@ -278,7 +278,7 @@ impl Position {
         }
     }
 
-    pub fn make_move(&mut self, mut m: Move) -> bool{
+    pub fn make_move(&mut self, mut m: Move) -> bool {
         assert_ne!(m.from, m.to);
 
         if m.move_flags.contains(MoveFlags::FLAGS_UNKNOWN) {
@@ -410,7 +410,7 @@ impl Position {
             m.resets_draw_counters(),
         );
         self.position_flags.toggle(PositionFlags::IS_WHITE_TURN);
-        
+
         !self.is_in_check(!self.is_white_turn())
     }
 

@@ -52,21 +52,22 @@ fn handle_uci() {
                     search_depth,
                     evaluation,
                 } = engine.search_game_tree();
-                if let Some(best_move) = best_move {
-                    let nps = (nodes_searched as f64 / search_time.as_secs_f64()) as usize;
-                    println!(
-                        "info depth {} nodes {} nps {} time {} score {} pv {}",
-                        search_depth,
-                        nodes_searched,
-                        nps,
-                        search_time.as_millis(),
-                        evaluation,
-                        best_move
-                    );
-                    println!("bestmove {}", best_move);
+                let best_move_or_none = if let Some(m) = best_move {
+                    format!("{}", m)
                 } else {
-                    println!("bestmove (none)");
-                }
+                    String::from("(none)")
+                };
+                let nps = (nodes_searched as f64 / search_time.as_secs_f64()) as usize;
+                println!(
+                    "info depth {} nodes {} nps {} time {} score {} pv {}",
+                    search_depth,
+                    nodes_searched,
+                    nps,
+                    search_time.as_millis(),
+                    evaluation,
+                    best_move_or_none
+                );
+                println!("bestmove {}", best_move_or_none);
             }
             _ => (), //panic!("unknown command {}", command),
         }

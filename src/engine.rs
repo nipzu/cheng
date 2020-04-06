@@ -31,7 +31,7 @@ impl fmt::Display for Evaluation {
             Evaluation::MateIn(dist) => {
                 let half_move_dist = dist - 2 * dist.signum();
                 write!(f, "mate {}", half_move_dist / 2 + half_move_dist % 2)
-            },
+            }
         }
     }
 }
@@ -55,7 +55,7 @@ impl PartialOrd for Evaluation {
                 } else {
                     Some(s.cmp(&o))
                 }
-            },
+            }
             (Evaluation::Heuristic(s), Evaluation::Heuristic(o)) => s.partial_cmp(o),
             (Evaluation::MateIn(s), Evaluation::Heuristic(_)) => Some(s.cmp(&0)),
             (Evaluation::Heuristic(_), Evaluation::MateIn(o)) => Some(0.cmp(o)),
@@ -132,11 +132,10 @@ impl Engine {
         if cur_depth == self.depth {
             return (
                 None,
-                if is_white_turn {
-                    Self::heuristic_evaluation(self.game_tree.last().unwrap().get_squares())
-                } else {
-                    -Self::heuristic_evaluation(self.game_tree.last().unwrap().get_squares())
-                }
+                Self::heuristic_evaluation(
+                    self.game_tree.last().unwrap().get_squares(),
+                    is_white_turn,
+                ),
             );
         }
 
@@ -180,10 +179,10 @@ impl Engine {
             .iter()
             .filter_map(|m| {
                 *self.game_tree.last_mut().unwrap() =
-                self.game_tree[self.game_tree.len() - 2].clone();
+                    self.game_tree[self.game_tree.len() - 2].clone();
                 if self.game_tree.last_mut().unwrap().make_move(*m) {
                     let (_, eval) = self.min_max_search(candidate_moves_buffer);
-                    Some((Some(*m),  -eval ))
+                    Some((Some(*m), -eval))
                 } else {
                     None
                 }
@@ -203,7 +202,7 @@ impl Engine {
         best_move
     }
 
-    fn heuristic_evaluation(position: &[Square; 64]) -> Evaluation {
+    fn heuristic_evaluation(position: &[Square; 64], is_white_turn: bool) -> Evaluation {
         let mut material_score = 0.0;
 
         for (i, piece) in position.iter().enumerate() {
@@ -223,7 +222,11 @@ impl Engine {
                 BlackQueen => -9.0,
             }
         }
-        Evaluation::Heuristic(material_score)
+        if is_white_turn {
+            Evaluation::Heuristic(material_score)
+        } else {
+            Evaluation::Heuristic(-material_score)
+        }
     }
 }
 
