@@ -116,7 +116,7 @@ impl Move {
         }
     }
 
-    pub fn resets_draw_counters(&self) -> bool {
+    pub fn resets_draw_counters(self) -> bool {
         self.move_flags.contains(MoveFlags::IS_PAWN_MOVE)
             || self.move_flags.contains(MoveFlags::IS_CAPTURE)
     }
@@ -181,43 +181,52 @@ impl Position {
     }
 
     pub fn is_insufficient_material(&self) -> bool {
-        if self.find_pieces(WhitePawn).is_empty()
-            && self.find_pieces(BlackPawn).is_empty()
-            && self.find_pieces(WhiteRook).is_empty()
-            && self.find_pieces(BlackRook).is_empty()
-            && self.find_pieces(WhiteQueen).is_empty()
-            && self.find_pieces(BlackQueen).is_empty()
-        {
-            let white_bishops = self.find_pieces(WhiteBishop);
-            let black_bishops = self.find_pieces(BlackBishop);
-            let white_knights = self.find_pieces(WhiteKnight);
-            let black_knights = self.find_pieces(BlackKnight);
+        let mut is_knight = false;
+        let mut bishops = [(Empty, false), (Empty, false)];
 
-            match (
-                white_bishops.len(),
-                black_bishops.len(),
-                white_knights.len(),
-                black_knights.len(),
-            ) {
-                (0, 0, 0, 0) | (1, 0, 0, 0) | (0, 1, 0, 0) | (0, 0, 1, 0) | (0, 0, 0, 1) => {
-                    return true
+        for (i, piece) in self.squares.iter().enumerate() {
+            match piece {
+                WhitePawn | BlackPawn | WhiteRook | BlackRook | WhiteQueen | BlackQueen => {
+                    return false
                 }
-                (1, 1, 0, 0) => {
-                    let wb = white_bishops[0];
-                    let bb = black_bishops[0];
-                    if wb.0 + wb.1 % 2 == bb.0 + bb.1 % 2 {
-                        return true;
+                Empty | WhiteKing | BlackKing => (),
+                WhiteKnight | BlackKnight => {
+                    if is_knight {
+                        return false;
+                    } else {
+                        is_knight = true;
                     }
                 }
-                _ => (),
+                WhiteBishop | BlackBishop => {
+                    if bishops[0].0 == Empty {
+                        bishops[0] = (*piece, ((i / 8) + (i % 8)) % 2 == 0);
+                    } else if bishops[1].0 == Empty {
+                        bishops[1] = (*piece, ((i / 8) + (i % 8)) % 2 == 0);
+                    } else {
+                        return false;
+                    }
+                }
             }
         }
 
-        false
+        bishops[0].0 != Empty && bishops[1].0 != Empty && bishops[0].1 != bishops[1].1
     }
 
     pub fn can_en_passant(&self) -> bool {
-        self.position_flags.contains(PositionFlags::CAN_EN_PASSANT)
+        if self.position_flags.contains(PositionFlags::CAN_EN_PASSANT) {
+            let x = (self.position_flags & PositionFlags::EN_PASSANT_FILE_MASK).bits as i32;
+            let (y, own_pawn) = if self.is_white_turn() {
+                (4, WhitePawn)
+            } else {
+                (3, BlackPawn)
+            };
+            for dx in [-1, 1].iter() {
+                if self.get_square(x + dx, y) == Some(own_pawn) {
+                    return true;
+                }
+            }
+        }
+        false
     }
 
     pub fn is_check(&self) -> bool {
@@ -408,48 +417,59 @@ impl Position {
             .contains(PositionFlags::RESETS_DRAW_COUNTERS)
     }
 
-    pub fn get_possible_moves(&self) -> Vec<Move> {
-        self.get_candidate_moves()
-            .filter(|cand_move| {
-                let mut next_position = self.clone();
-                next_position.make_move(*cand_move);
-                !next_position.is_in_check(self.is_white_turn())
-            })
-            .collect()
-    }
-
     pub fn is_white_turn(&self) -> bool {
         self.position_flags.contains(PositionFlags::IS_WHITE_TURN)
     }
 
-    fn get_candidate_moves(&self) -> impl Iterator<Item = Move> + '_ {
-        (0..8)
-            .map(move |x| (0..8).map(move |y| self.get_candidate_moves_for_square(x, y)))
-            .flatten()
-            .flatten()
+    pub fn is_legal_move(&self, cand_move: Move) -> bool {
+        let mut next_position = self.clone();
+        next_position.make_move(cand_move);
+        !next_position.is_in_check(self.is_white_turn())
     }
 
-    fn get_candidate_moves_for_square(&self, x: i32, y: i32) -> Vec<Move> {
+    pub fn get_candidate_moves(&self, candidate_moves_buffer: &mut Vec<Move>) {
+        for x in 0..8 {
+            for y in 0..8 {
+                self.get_candidate_moves_for_square(x, y, candidate_moves_buffer);
+            }
+        }
+    }
+
+    fn get_candidate_moves_for_square(
+        &self,
+        x: i32,
+        y: i32,
+        candidate_moves_buffer: &mut Vec<Move>,
+    ) {
         if let Some(piece) = self.get_square(x, y) {
             if piece != Empty && piece.is_white() == self.is_white_turn() {
                 match piece {
-                    WhiteKing | BlackKing => return self.get_king_candidate_moves(x, y),
-                    WhiteQueen | BlackQueen => return self.get_queen_candidate_moves(x, y),
-                    WhiteRook | BlackRook => return self.get_rook_candidate_moves(x, y),
-                    WhiteBishop | BlackBishop => return self.get_bishop_candidate_moves(x, y),
-                    WhiteKnight | BlackKnight => return self.get_knight_candidate_moves(x, y),
-                    WhitePawn | BlackPawn => return self.get_pawn_candidate_moves(x, y),
+                    WhiteKing | BlackKing => {
+                        self.get_king_candidate_moves(x, y, candidate_moves_buffer)
+                    }
+                    WhiteQueen | BlackQueen => {
+                        self.get_queen_candidate_moves(x, y, candidate_moves_buffer)
+                    }
+                    WhiteRook | BlackRook => {
+                        self.get_rook_candidate_moves(x, y, candidate_moves_buffer)
+                    }
+                    WhiteBishop | BlackBishop => {
+                        self.get_bishop_candidate_moves(x, y, candidate_moves_buffer)
+                    }
+                    WhiteKnight | BlackKnight => {
+                        self.get_knight_candidate_moves(x, y, candidate_moves_buffer)
+                    }
+                    WhitePawn | BlackPawn => {
+                        self.get_pawn_candidate_moves(x, y, candidate_moves_buffer)
+                    }
                     _ => unreachable!(),
-                }
+                };
             }
         }
-        Vec::new()
     }
 
-    fn get_pawn_candidate_moves(&self, x: i32, y: i32) -> Vec<Move> {
+    fn get_pawn_candidate_moves(&self, x: i32, y: i32, candidate_moves_buffer: &mut Vec<Move>) {
         let dy = if self.is_white_turn() { 1 } else { -1 };
-
-        let mut candidate_moves = Vec::new();
         for dx in [1, -1].iter() {
             // basic capturing
             if let Some(piece) = self.get_square(x + dx, y + dy) {
@@ -463,14 +483,14 @@ impl Position {
                         ]
                         .iter()
                         {
-                            candidate_moves.push(Move {
+                            candidate_moves_buffer.push(Move {
                                 from: (8 * y + x) as u8,
                                 to: (8 * (y + dy) + x + dx) as u8,
                                 move_flags: MoveFlags::IS_PAWN_MOVE | MoveFlags::IS_CAPTURE | *p,
                             });
                         }
                     } else {
-                        candidate_moves.push(Move {
+                        candidate_moves_buffer.push(Move {
                             from: (8 * y + x) as u8,
                             to: (8 * (y + dy) + x + dx) as u8,
                             move_flags: MoveFlags::IS_PAWN_MOVE | MoveFlags::IS_CAPTURE,
@@ -482,10 +502,9 @@ impl Position {
             // en passant
             if self.position_flags.contains(PositionFlags::CAN_EN_PASSANT)
                 && y == if self.is_white_turn() { 4 } else { 3 }
-                && (PositionFlags::EN_PASSANT_FILE_MASK & self.position_flags).bits
-                    == (x + dx) as u16
+                && (PositionFlags::EN_PASSANT_FILE_MASK & self.position_flags).bits as i32 == x + dx
             {
-                candidate_moves.push(Move {
+                candidate_moves_buffer.push(Move {
                     from: (8 * y + x) as u8,
                     to: (8 * (y + dy) + x + dx) as u8,
                     // do not set IS_CAPTURE
@@ -505,14 +524,14 @@ impl Position {
                     ]
                     .iter()
                     {
-                        candidate_moves.push(Move {
+                        candidate_moves_buffer.push(Move {
                             from: (8 * y + x) as u8,
                             to: (8 * (y + dy) + x) as u8,
                             move_flags: MoveFlags::IS_PAWN_MOVE | *p,
                         });
                     }
                 } else {
-                    candidate_moves.push(Move {
+                    candidate_moves_buffer.push(Move {
                         from: (8 * y + x) as u8,
                         to: (8 * (y + dy) + x) as u8,
                         move_flags: MoveFlags::IS_PAWN_MOVE,
@@ -520,7 +539,7 @@ impl Position {
                 }
                 if let Some(piece2) = self.get_square(x, y + 2 * dy) {
                     if piece2 == Empty && y % 5 == 1 {
-                        candidate_moves.push(Move {
+                        candidate_moves_buffer.push(Move {
                             from: (8 * y + x) as u8,
                             to: (8 * (y + 2 * dy) + x) as u8,
                             move_flags: MoveFlags::IS_PAWN_MOVE,
@@ -529,12 +548,9 @@ impl Position {
                 }
             }
         }
-
-        candidate_moves
     }
 
-    fn get_knight_candidate_moves(&self, x: i32, y: i32) -> Vec<Move> {
-        let mut candidate_moves = Vec::new();
+    fn get_knight_candidate_moves(&self, x: i32, y: i32, candidate_moves_buffer: &mut Vec<Move>) {
         for (dx, dy) in [
             (1, 2),
             (1, -2),
@@ -549,13 +565,13 @@ impl Position {
         {
             if let Some(piece) = self.get_square(x + dx, y + dy) {
                 if piece == Empty {
-                    candidate_moves.push(Move {
+                    candidate_moves_buffer.push(Move {
                         from: (8 * y + x) as u8,
                         to: (8 * (y + dy) + x + dx) as u8,
                         move_flags: MoveFlags::empty(),
                     });
                 } else if piece.is_white() != self.is_white_turn() {
-                    candidate_moves.push(Move {
+                    candidate_moves_buffer.push(Move {
                         from: (8 * y + x) as u8,
                         to: (8 * (y + dy) + x + dx) as u8,
                         move_flags: MoveFlags::IS_CAPTURE,
@@ -563,24 +579,21 @@ impl Position {
                 }
             }
         }
-
-        candidate_moves
     }
 
-    fn get_king_candidate_moves(&self, x: i32, y: i32) -> Vec<Move> {
-        let mut candidate_moves = Vec::new();
+    fn get_king_candidate_moves(&self, x: i32, y: i32, candidate_moves_buffer: &mut Vec<Move>) {
         // basic moves
         for dx in -1..=1 {
             for dy in -1..=1 {
                 if let Some(piece) = self.get_square(x + dx, y + dy) {
                     if piece == Empty {
-                        candidate_moves.push(Move {
+                        candidate_moves_buffer.push(Move {
                             from: (8 * y + x) as u8,
                             to: (8 * (y + dy) + x + dx) as u8,
                             move_flags: MoveFlags::empty(),
                         });
                     } else if piece.is_white() != self.is_white_turn() {
-                        candidate_moves.push(Move {
+                        candidate_moves_buffer.push(Move {
                             from: (8 * y + x) as u8,
                             to: (8 * (y + dy) + x + dx) as u8,
                             move_flags: MoveFlags::IS_CAPTURE,
@@ -612,7 +625,7 @@ impl Position {
                 .toggle(PositionFlags::IS_WHITE_TURN);
 
             if !test_check_5.is_check() {
-                candidate_moves.push(Move {
+                candidate_moves_buffer.push(Move {
                     from: (8 * y + x) as u8,
                     to: (8 * y + x + 2) as u8,
                     move_flags: MoveFlags::empty(),
@@ -646,38 +659,33 @@ impl Position {
                 .position_flags
                 .toggle(PositionFlags::IS_WHITE_TURN);
             if !test_check_3.is_check() && !test_check_2.is_check() {
-                candidate_moves.push(Move {
+                candidate_moves_buffer.push(Move {
                     from: (8 * y + x) as u8,
                     to: (8 * y + x - 2) as u8,
                     move_flags: MoveFlags::empty(),
                 });
             }
         }
-
-        candidate_moves
     }
 
-    fn get_queen_candidate_moves(&self, x: i32, y: i32) -> Vec<Move> {
-        let mut candidate_moves = self.get_rook_candidate_moves(x, y);
-        candidate_moves.append(&mut self.get_bishop_candidate_moves(x, y));
-        candidate_moves
+    fn get_queen_candidate_moves(&self, x: i32, y: i32, candidate_moves_buffer: &mut Vec<Move>) {
+        self.get_rook_candidate_moves(x, y, candidate_moves_buffer);
+        self.get_bishop_candidate_moves(x, y, candidate_moves_buffer);
     }
 
-    fn get_rook_candidate_moves(&self, x: i32, y: i32) -> Vec<Move> {
+    fn get_rook_candidate_moves(&self, x: i32, y: i32, candidate_moves_buffer: &mut Vec<Move>) {
         use std::iter::repeat;
-
-        let mut candidate_moves = Vec::with_capacity(16);
 
         for (dx, dy) in (x + 1..8).zip(repeat(y)) {
             if let Some(piece) = self.get_square(dx, dy) {
                 if piece == Empty {
-                    candidate_moves.push(Move {
+                    candidate_moves_buffer.push(Move {
                         from: (8 * y + x) as u8,
                         to: (8 * dy + dx) as u8,
                         move_flags: MoveFlags::empty(),
                     });
                 } else if piece.is_white() != self.is_white_turn() {
-                    candidate_moves.push(Move {
+                    candidate_moves_buffer.push(Move {
                         from: (8 * y + x) as u8,
                         to: (8 * dy + dx) as u8,
                         move_flags: MoveFlags::IS_CAPTURE,
@@ -691,13 +699,13 @@ impl Position {
         for (dx, dy) in (repeat(x)).zip(y + 1..8) {
             if let Some(piece) = self.get_square(dx, dy) {
                 if piece == Empty {
-                    candidate_moves.push(Move {
+                    candidate_moves_buffer.push(Move {
                         from: (8 * y + x) as u8,
                         to: (8 * dy + dx) as u8,
                         move_flags: MoveFlags::empty(),
                     });
                 } else if piece.is_white() != self.is_white_turn() {
-                    candidate_moves.push(Move {
+                    candidate_moves_buffer.push(Move {
                         from: (8 * y + x) as u8,
                         to: (8 * dy + dx) as u8,
                         move_flags: MoveFlags::IS_CAPTURE,
@@ -711,13 +719,13 @@ impl Position {
         for (dx, dy) in (0..x).rev().zip(repeat(y)) {
             if let Some(piece) = self.get_square(dx, dy) {
                 if piece == Empty {
-                    candidate_moves.push(Move {
+                    candidate_moves_buffer.push(Move {
                         from: (8 * y + x) as u8,
                         to: (8 * dy + dx) as u8,
                         move_flags: MoveFlags::empty(),
                     });
                 } else if piece.is_white() != self.is_white_turn() {
-                    candidate_moves.push(Move {
+                    candidate_moves_buffer.push(Move {
                         from: (8 * y + x) as u8,
                         to: (8 * dy + dx) as u8,
                         move_flags: MoveFlags::IS_CAPTURE,
@@ -731,13 +739,13 @@ impl Position {
         for (dx, dy) in (repeat(x)).zip((0..y).rev()) {
             if let Some(piece) = self.get_square(dx, dy) {
                 if piece == Empty {
-                    candidate_moves.push(Move {
+                    candidate_moves_buffer.push(Move {
                         from: (8 * y + x) as u8,
                         to: (8 * dy + dx) as u8,
                         move_flags: MoveFlags::empty(),
                     });
                 } else if piece.is_white() != self.is_white_turn() {
-                    candidate_moves.push(Move {
+                    candidate_moves_buffer.push(Move {
                         from: (8 * y + x) as u8,
                         to: (8 * dy + dx) as u8,
                         move_flags: MoveFlags::IS_CAPTURE,
@@ -748,23 +756,19 @@ impl Position {
                 }
             }
         }
-
-        candidate_moves
     }
 
-    fn get_bishop_candidate_moves(&self, x: i32, y: i32) -> Vec<Move> {
-        let mut candidate_moves = Vec::with_capacity(16);
-
+    fn get_bishop_candidate_moves(&self, x: i32, y: i32, candidate_moves_buffer: &mut Vec<Move>) {
         for (dx, dy) in (x + 1..8).zip(y + 1..8) {
             if let Some(piece) = self.get_square(dx, dy) {
                 if piece == Empty {
-                    candidate_moves.push(Move {
+                    candidate_moves_buffer.push(Move {
                         from: (8 * y + x) as u8,
                         to: (8 * dy + dx) as u8,
                         move_flags: MoveFlags::empty(),
                     });
                 } else if piece.is_white() != self.is_white_turn() {
-                    candidate_moves.push(Move {
+                    candidate_moves_buffer.push(Move {
                         from: (8 * y + x) as u8,
                         to: (8 * dy + dx) as u8,
                         move_flags: MoveFlags::IS_CAPTURE,
@@ -778,13 +782,13 @@ impl Position {
         for (dx, dy) in (x + 1..8).zip((0..y).rev()) {
             if let Some(piece) = self.get_square(dx, dy) {
                 if piece == Empty {
-                    candidate_moves.push(Move {
+                    candidate_moves_buffer.push(Move {
                         from: (8 * y + x) as u8,
                         to: (8 * dy + dx) as u8,
                         move_flags: MoveFlags::empty(),
                     });
                 } else if piece.is_white() != self.is_white_turn() {
-                    candidate_moves.push(Move {
+                    candidate_moves_buffer.push(Move {
                         from: (8 * y + x) as u8,
                         to: (8 * dy + dx) as u8,
                         move_flags: MoveFlags::IS_CAPTURE,
@@ -798,13 +802,13 @@ impl Position {
         for (dx, dy) in (0..x).rev().zip(y + 1..8) {
             if let Some(piece) = self.get_square(dx, dy) {
                 if piece == Empty {
-                    candidate_moves.push(Move {
+                    candidate_moves_buffer.push(Move {
                         from: (8 * y + x) as u8,
                         to: (8 * dy + dx) as u8,
                         move_flags: MoveFlags::empty(),
                     });
                 } else if piece.is_white() != self.is_white_turn() {
-                    candidate_moves.push(Move {
+                    candidate_moves_buffer.push(Move {
                         from: (8 * y + x) as u8,
                         to: (8 * dy + dx) as u8,
                         move_flags: MoveFlags::IS_CAPTURE,
@@ -818,13 +822,13 @@ impl Position {
         for (dx, dy) in (0..x).rev().zip((0..y).rev()) {
             if let Some(piece) = self.get_square(dx, dy) {
                 if piece == Empty {
-                    candidate_moves.push(Move {
+                    candidate_moves_buffer.push(Move {
                         from: (8 * y + x) as u8,
                         to: (8 * dy + dx) as u8,
                         move_flags: MoveFlags::empty(),
                     });
                 } else if piece.is_white() != self.is_white_turn() {
-                    candidate_moves.push(Move {
+                    candidate_moves_buffer.push(Move {
                         from: (8 * y + x) as u8,
                         to: (8 * dy + dx) as u8,
                         move_flags: MoveFlags::IS_CAPTURE,
@@ -835,15 +839,7 @@ impl Position {
                 }
             }
         }
-
-        candidate_moves
     }
-
-    /*pub fn set_square(&mut self, x: i32, y: i32, square: Square) {
-        if 0 <= x && x <= 7 && 0 <= y && y <= 7 {
-            self.squares[(8 * y + x) as usize] = square;
-        }
-    }*/
 
     pub fn get_square(&self, x: i32, y: i32) -> Option<Square> {
         if 0 <= x && x <= 7 && 0 <= y && y <= 7 {
@@ -851,15 +847,6 @@ impl Position {
         } else {
             None
         }
-    }
-
-    pub fn find_pieces(&self, piece: Square) -> Vec<(i32, i32)> {
-        self.squares
-            .iter()
-            .enumerate()
-            .filter(|(_, s)| *s == &piece)
-            .map(|(i, _)| ((i % 8) as i32, (i / 8) as i32))
-            .collect()
     }
 
     fn is_in_check_by_pawn(&self, x: i32, y: i32, is_white: bool) -> bool {

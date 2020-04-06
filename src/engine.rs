@@ -45,8 +45,13 @@ impl Engine {
     pub fn search_game_tree(&mut self) -> SearchOutput {
         self.nodes_searched = 0;
 
+        let mut candidate_moves_buffer = Vec::with_capacity(self.depth);
+        for _ in 0..self.depth {
+            candidate_moves_buffer.push(Vec::with_capacity(256));
+        }
+
         let start_time = Instant::now();
-        let (best_move, mut evaluation) = self.min_max_search();
+        let (best_move, mut evaluation) = self.min_max_search(&mut candidate_moves_buffer);
         let end_time = Instant::now();
 
         if !self.game_tree[self.root_node].is_white_turn() {
@@ -63,12 +68,14 @@ impl Engine {
         }
     }
 
-    fn min_max_search(&mut self) -> (Option<Move>, f64) {
+    fn min_max_search(&mut self, candidate_moves_buffer: &mut [Vec<Move>]) -> (Option<Move>, f64) {
         self.nodes_searched += 1;
 
-        assert!(self.game_tree.len() <= self.root_node + self.depth + 1);
+        let cur_depth = self.game_tree.len() - self.root_node - 1;
 
-        if self.game_tree.len() == self.root_node + self.depth + 1 {
+        assert!(cur_depth <= self.depth);
+
+        if cur_depth == self.depth {
             return (
                 None,
                 Self::heuristic_evaluation(self.game_tree.last().unwrap().get_squares()),
@@ -91,56 +98,58 @@ impl Engine {
                 return (None, 0.0);
             }
             // cant be reached more than once
-            if num_same_boards >= 3
-                && (!self.game_tree[i - 1].can_en_passant()
-                    || self.game_tree[i - 1].get_possible_moves().len()
-                        == self.game_tree.last().unwrap().get_possible_moves().len())
-            {
+            if num_same_boards >= 3 && !self.game_tree[i - 1].can_en_passant() {
                 return (None, 0.0);
             }
-        }
-
-        let possible_moves = self.game_tree.last().unwrap().get_possible_moves();
-
-        if possible_moves.is_empty() {
-            return if self.game_tree.last().unwrap().is_check() {
-                if self.game_tree.last().unwrap().is_white_turn() {
-                    (None, std::f64::NEG_INFINITY)
-                } else {
-                    (None, std::f64::INFINITY)
-                }
-            } else {
-                (None, 0.0)
-            };
         }
 
         if self.game_tree.last().unwrap().is_insufficient_material() {
             return (None, 0.0);
         }
 
-        let mut possible_moves_evaluated = Vec::new();
+        candidate_moves_buffer[0].clear();
+        self.game_tree
+            .last()
+            .unwrap()
+            .get_candidate_moves(&mut candidate_moves_buffer[0]);
 
-        let cur_node = self.game_tree.last().unwrap().clone();
-        self.game_tree.push(cur_node.clone());
-        for possible_move in possible_moves {
-            *self.game_tree.last_mut().unwrap() = cur_node.clone();
-            self.game_tree.last_mut().unwrap().make_move(possible_move);
-            let eval = self.min_max_search().1;
-            possible_moves_evaluated.push((Some(possible_move), eval));
-        }
+        let (move_buffer, candidate_moves_buffer) =
+            candidate_moves_buffer.split_first_mut().unwrap();
+        let is_white_turn = self.game_tree.last().unwrap().is_white_turn();
+
+
+        self.game_tree.push(self.game_tree.last().unwrap().clone());
+        let best_move = move_buffer
+            .iter()
+            .filter_map(|m| {
+                if self.game_tree[self.game_tree.len() - 2].is_legal_move(*m) {
+                    *self.game_tree.last_mut().unwrap() =
+                        self.game_tree[self.game_tree.len() - 2].clone();
+                    self.game_tree.last_mut().unwrap().make_move(*m);
+                    Some((Some(*m), self.min_max_search(candidate_moves_buffer).1))
+                } else {
+                    None
+                }
+            })
+            .max_by(|a, b| {
+                if is_white_turn {
+                    a.1.partial_cmp(&b.1).unwrap()
+                } else {
+                    b.1.partial_cmp(&a.1).unwrap()
+                }
+            })
+            .unwrap_or_else(|| {
+                if self.game_tree[self.game_tree.len() - 2].is_check() {
+                    if is_white_turn {
+                        (None, std::f64::NEG_INFINITY)
+                    } else {
+                        (None, std::f64::INFINITY)
+                    }
+                } else {
+                    (None, 0.0)
+                }
+            });
         self.game_tree.pop();
-
-        let best_move = if self.game_tree.last().unwrap().is_white_turn() {
-            *possible_moves_evaluated
-                .iter()
-                .max_by(|a, b| a.1.partial_cmp(&b.1).unwrap())
-                .unwrap()
-        } else {
-            *possible_moves_evaluated
-                .iter()
-                .min_by(|a, b| a.1.partial_cmp(&b.1).unwrap())
-                .unwrap()
-        };
 
         best_move
     }
@@ -171,12 +180,6 @@ impl Engine {
 
 impl fmt::Debug for Engine {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        writeln!(f, "{:?}", self.game_tree[self.root_node])?;
-        writeln!(f, "possible moves:")?;
-        for possible_move in self.game_tree[self.root_node].get_possible_moves() {
-            writeln!(f, "{}", possible_move)?;
-        }
-
-        Ok(())
+        writeln!(f, "{:?}", self.game_tree[self.root_node])
     }
 }
