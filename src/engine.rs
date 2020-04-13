@@ -10,7 +10,7 @@ pub struct Engine {
     depth: usize,
 }
 
-#[derive(PartialEq)]
+#[derive(PartialEq, Copy, Clone)]
 pub enum Evaluation {
     Heuristic(f64),
     MateIn(i32),
@@ -29,7 +29,7 @@ impl fmt::Display for Evaluation {
         match self {
             Evaluation::Heuristic(eval) => write!(f, "cp {}", (eval * 100.0).round() as i32),
             Evaluation::MateIn(dist) => {
-                let half_move_dist = dist - 2 * dist.signum();
+                let half_move_dist = dist - 1 * dist.signum();
                 write!(f, "mate {}", half_move_dist / 2 + half_move_dist % 2)
             }
         }
@@ -95,6 +95,10 @@ impl Engine {
         self.root_node = self.game_tree.len() - 1;
     }
 
+    pub fn is_root_white_turn(&self) -> bool {
+        self.game_tree[self.root_node].is_white_turn()
+    }
+
     pub fn search_game_tree(&mut self) -> SearchOutput {
         self.nodes_searched = 0;
 
@@ -104,7 +108,11 @@ impl Engine {
         }
 
         let start_time = Instant::now();
-        let (best_move, evaluation) = self.min_max_search(&mut candidate_moves_buffer);
+        let (best_move, evaluation) = self.min_max_search(
+            &mut candidate_moves_buffer,
+            Evaluation::MateIn(1),
+            Evaluation::MateIn(-1),
+        );
         let end_time = Instant::now();
 
         let search_time = end_time - start_time;
@@ -120,6 +128,8 @@ impl Engine {
     fn min_max_search(
         &mut self,
         candidate_moves_buffer: &mut [Vec<Move>],
+        black_max_eval: Evaluation,
+        white_min_eval: Evaluation,
     ) -> (Option<Move>, Evaluation) {
         self.nodes_searched += 1;
 
@@ -132,10 +142,7 @@ impl Engine {
         if cur_depth == self.depth {
             return (
                 None,
-                Self::heuristic_evaluation(
-                    self.game_tree.last().unwrap().get_squares(),
-                    is_white_turn,
-                ),
+                Self::heuristic_evaluation(self.game_tree.last().unwrap().get_squares()),
             );
         }
 
@@ -175,34 +182,52 @@ impl Engine {
 
         self.game_tree.push(self.game_tree.last().unwrap().clone());
 
-        let mut best_move = move_buffer
-            .iter()
-            .filter_map(|m| {
-                *self.game_tree.last_mut().unwrap() =
-                    self.game_tree[self.game_tree.len() - 2].clone();
-                if self.game_tree.last_mut().unwrap().make_move(*m) {
-                    let (_, eval) = self.min_max_search(candidate_moves_buffer);
-                    Some((Some(*m), -eval))
+        let mut best_move: (Option<Move>, Evaluation) =
+            (None, Evaluation::MateIn(if is_white_turn { -1 } else { 1 }));
+
+        let mut did_move = false;
+
+        for m in move_buffer {
+            *self.game_tree.last_mut().unwrap() = self.game_tree[self.game_tree.len() - 2].clone();
+            if self.game_tree.last_mut().unwrap().make_move(*m) {
+                did_move = true;
+                if is_white_turn {
+                    let (_, eval) =
+                        self.min_max_search(candidate_moves_buffer, black_max_eval, best_move.1);
+                    if eval >= best_move.1 {
+                        best_move = (Some(*m), eval);
+                    }
+                    if eval > black_max_eval {
+                        break;
+                    }
                 } else {
-                    None
+                    let (_, eval) =
+                        self.min_max_search(candidate_moves_buffer, best_move.1, white_min_eval);
+                    if eval <= best_move.1 {
+                        best_move = (Some(*m), eval);
+                    }
+                    if eval < white_min_eval {
+                        break;
+                    }
                 }
-            })
-            .max_by(|a, b| a.1.partial_cmp(&b.1).unwrap())
-            .unwrap_or_else(|| {
-                if self.game_tree[self.game_tree.len() - 2].is_check() {
-                    (None, Evaluation::MateIn(if is_white_turn { -1 } else { 1 }))
-                } else {
-                    (None, Evaluation::Heuristic(0.0))
-                }
-            });
+            }
+        }
         self.game_tree.pop();
 
         best_move.1.increase_mate_dist();
 
+        if !did_move {
+            return if self.game_tree.last().unwrap().is_check() {
+                (None, Evaluation::MateIn(if is_white_turn { -1 } else { 1 }))
+            } else {
+                (None, Evaluation::Heuristic(0.0))
+            };
+        }
+
         best_move
     }
 
-    fn heuristic_evaluation(position: &[Square; 64], is_white_turn: bool) -> Evaluation {
+    fn heuristic_evaluation(position: &[Square; 64]) -> Evaluation {
         let mut material_score = 0.0;
 
         for (i, piece) in position.iter().enumerate() {
@@ -222,11 +247,7 @@ impl Engine {
                 BlackQueen => -9.0,
             }
         }
-        if is_white_turn {
-            Evaluation::Heuristic(material_score)
-        } else {
-            Evaluation::Heuristic(-material_score)
-        }
+        Evaluation::Heuristic(material_score)
     }
 }
 

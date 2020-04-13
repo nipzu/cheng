@@ -12,7 +12,7 @@ fn main() {
 
 fn handle_uci() {
     let mut engine = Engine::new();
-    engine.set_depth(4);
+    engine.set_depth(6);
     loop {
         let mut command = String::new();
         stdin().read_line(&mut command).unwrap();
@@ -58,13 +58,18 @@ fn handle_uci() {
                     String::from("(none)")
                 };
                 let nps = (nodes_searched as f64 / search_time.as_secs_f64()) as usize;
+                let real_evaluation = if engine.is_root_white_turn() {
+                    evaluation
+                } else {
+                    -evaluation
+                };
                 println!(
                     "info depth {} nodes {} nps {} time {} score {} pv {}",
                     search_depth,
                     nodes_searched,
                     nps,
                     search_time.as_millis(),
-                    evaluation,
+                    real_evaluation,
                     best_move_or_none
                 );
                 println!("bestmove {}", best_move_or_none);
