@@ -187,31 +187,74 @@ impl Engine {
 
         let mut did_move = false;
 
-        for m in move_buffer {
-            *self.game_tree.last_mut().unwrap() = self.game_tree[self.game_tree.len() - 2].clone();
-            if self.game_tree.last_mut().unwrap().make_move(*m) {
-                did_move = true;
-                if is_white_turn {
-                    let (_, eval) =
-                        self.min_max_search(candidate_moves_buffer, black_max_eval, best_move.1);
-                    if eval >= best_move.1 {
-                        best_move = (Some(*m), eval);
+        'outer: for _ in 0..1 {
+            for m in move_buffer.iter() {
+                *self.game_tree.last_mut().unwrap() =
+                    self.game_tree[self.game_tree.len() - 2].clone();
+                if m.is_capture() && self.game_tree.last_mut().unwrap().make_move(*m) {
+                    did_move = true;
+                    if is_white_turn {
+                        let (_, eval) = self.min_max_search(
+                            candidate_moves_buffer,
+                            black_max_eval,
+                            best_move.1,
+                        );
+                        if eval >= best_move.1 {
+                            best_move = (Some(*m), eval);
+                        }
+                        if eval > black_max_eval {
+                            break 'outer;
+                        }
+                    } else {
+                        let (_, eval) = self.min_max_search(
+                            candidate_moves_buffer,
+                            best_move.1,
+                            white_min_eval,
+                        );
+                        if eval <= best_move.1 {
+                            best_move = (Some(*m), eval);
+                        }
+                        if eval < white_min_eval {
+                            break 'outer;
+                        }
                     }
-                    if eval > black_max_eval {
-                        break;
-                    }
-                } else {
-                    let (_, eval) =
-                        self.min_max_search(candidate_moves_buffer, best_move.1, white_min_eval);
-                    if eval <= best_move.1 {
-                        best_move = (Some(*m), eval);
-                    }
-                    if eval < white_min_eval {
-                        break;
+                }
+            }
+
+            for m in move_buffer.iter() {
+                *self.game_tree.last_mut().unwrap() =
+                    self.game_tree[self.game_tree.len() - 2].clone();
+                if !m.is_capture() && self.game_tree.last_mut().unwrap().make_move(*m) {
+                    did_move = true;
+                    if is_white_turn {
+                        let (_, eval) = self.min_max_search(
+                            candidate_moves_buffer,
+                            black_max_eval,
+                            best_move.1,
+                        );
+                        if eval >= best_move.1 {
+                            best_move = (Some(*m), eval);
+                        }
+                        if eval > black_max_eval {
+                            break 'outer;
+                        }
+                    } else {
+                        let (_, eval) = self.min_max_search(
+                            candidate_moves_buffer,
+                            best_move.1,
+                            white_min_eval,
+                        );
+                        if eval <= best_move.1 {
+                            best_move = (Some(*m), eval);
+                        }
+                        if eval < white_min_eval {
+                            break 'outer;
+                        }
                     }
                 }
             }
         }
+
         self.game_tree.pop();
 
         best_move.1.increase_mate_dist();

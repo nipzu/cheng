@@ -62,6 +62,24 @@ impl Square {
             _ => false,
         }
     }
+
+    pub fn get_value(self) -> f64 {
+        match self {
+            Empty => 0.0,
+            WhitePawn => 1.0,
+            BlackPawn => -1.0,
+            WhiteKnight => 3.0,
+            BlackKnight => -3.0,
+            WhiteBishop => 3.0,
+            BlackBishop => -3.0,
+            WhiteRook => 5.0,
+            BlackRook => -5.0,
+            WhiteKing => 0.0,
+            BlackKing => 0.0,
+            WhiteQueen => 9.0,
+            BlackQueen => -9.0,
+        }
+    }
 }
 
 bitflags! {
@@ -119,6 +137,10 @@ impl Move {
     pub fn resets_draw_counters(self) -> bool {
         self.move_flags.contains(MoveFlags::IS_PAWN_MOVE)
             || self.move_flags.contains(MoveFlags::IS_CAPTURE)
+    }
+
+    pub fn is_capture(self) -> bool {
+        self.move_flags.contains(MoveFlags::IS_CAPTURE)
     }
 }
 
@@ -178,6 +200,13 @@ impl Position {
 
     pub fn get_squares(&self) -> &[Square; 64] {
         &self.squares
+    }
+
+    pub fn is_priority_move(&self, m: Move) -> bool {
+        let from_value = self.squares[m.from as usize].get_value().abs();
+        let to_value = self.squares[m.to as usize].get_value().abs();
+
+        to_value - from_value >= -0.01
     }
 
     pub fn is_insufficient_material(&self) -> bool {

@@ -12,7 +12,7 @@ fn main() {
 
 fn handle_uci() {
     let mut engine = Engine::new();
-    engine.set_depth(6);
+    engine.set_depth(8);
     loop {
         let mut command = String::new();
         stdin().read_line(&mut command).unwrap();
@@ -24,7 +24,7 @@ fn handle_uci() {
 
         match command_args[0] {
             "uci" => {
-                println!("id name cheng");
+                println!("id name sherlock");
                 println!("id author nipzu");
                 println!("uciok");
             }
