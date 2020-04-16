@@ -12,7 +12,7 @@ fn main() {
 
 fn handle_uci() {
     let mut engine = Engine::new();
-    engine.set_depth(8);
+    engine.set_depth(4);
     loop {
         let mut command = String::new();
         stdin().read_line(&mut command).unwrap();

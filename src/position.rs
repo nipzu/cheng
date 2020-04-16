@@ -697,173 +697,63 @@ impl Position {
         self.get_rook_candidate_moves(x, y, candidate_moves_buffer);
         self.get_bishop_candidate_moves(x, y, candidate_moves_buffer);
     }
+}
 
+macro_rules! get_candidates_for_line {
+    ($self_:ident, $x:expr, $y:expr, $candidate_moves_buffer:expr, $iterator:expr) => {
+        for (dx, dy) in $iterator {
+            if let Some(piece) = $self_.get_square(dx, dy) {
+                if piece == Empty {
+                    $candidate_moves_buffer.push(Move {
+                        from: (8 * $y + $x) as u8,
+                        to: (8 * dy + dx) as u8,
+                        move_flags: MoveFlags::empty(),
+                    });
+                } else if piece.is_white() != $self_.is_white_turn() {
+                    $candidate_moves_buffer.push(Move {
+                        from: (8 * $y + $x) as u8,
+                        to: (8 * dy + dx) as u8,
+                        move_flags: MoveFlags::IS_CAPTURE,
+                    });
+                    break;
+                } else {
+                    break;
+                }
+            }
+        }
+    };
+}
+
+macro_rules! check_check_line {
+    ($self_:ident, $iterator:expr, $enemy_piece_one:expr, $enemy_piece_two:expr) => {
+        for (dx, dy) in $iterator {
+            if $self_.get_square(dx, dy) == Some($enemy_piece_one)
+                || $self_.get_square(dx, dy) == Some($enemy_piece_two)
+            {
+                return true;
+            } else if $self_.get_square(dx, dy) != Some(Empty) {
+                break;
+            }
+        }
+    };
+}
+
+impl Position {
     fn get_rook_candidate_moves(&self, x: i32, y: i32, candidate_moves_buffer: &mut Vec<Move>) {
         use std::iter::repeat;
 
-        for (dx, dy) in (x + 1..8).zip(repeat(y)) {
-            if let Some(piece) = self.get_square(dx, dy) {
-                if piece == Empty {
-                    candidate_moves_buffer.push(Move {
-                        from: (8 * y + x) as u8,
-                        to: (8 * dy + dx) as u8,
-                        move_flags: MoveFlags::empty(),
-                    });
-                } else if piece.is_white() != self.is_white_turn() {
-                    candidate_moves_buffer.push(Move {
-                        from: (8 * y + x) as u8,
-                        to: (8 * dy + dx) as u8,
-                        move_flags: MoveFlags::IS_CAPTURE,
-                    });
-                    break;
-                } else {
-                    break;
-                }
-            }
-        }
-        for (dx, dy) in (repeat(x)).zip(y + 1..8) {
-            if let Some(piece) = self.get_square(dx, dy) {
-                if piece == Empty {
-                    candidate_moves_buffer.push(Move {
-                        from: (8 * y + x) as u8,
-                        to: (8 * dy + dx) as u8,
-                        move_flags: MoveFlags::empty(),
-                    });
-                } else if piece.is_white() != self.is_white_turn() {
-                    candidate_moves_buffer.push(Move {
-                        from: (8 * y + x) as u8,
-                        to: (8 * dy + dx) as u8,
-                        move_flags: MoveFlags::IS_CAPTURE,
-                    });
-                    break;
-                } else {
-                    break;
-                }
-            }
-        }
-        for (dx, dy) in (0..x).rev().zip(repeat(y)) {
-            if let Some(piece) = self.get_square(dx, dy) {
-                if piece == Empty {
-                    candidate_moves_buffer.push(Move {
-                        from: (8 * y + x) as u8,
-                        to: (8 * dy + dx) as u8,
-                        move_flags: MoveFlags::empty(),
-                    });
-                } else if piece.is_white() != self.is_white_turn() {
-                    candidate_moves_buffer.push(Move {
-                        from: (8 * y + x) as u8,
-                        to: (8 * dy + dx) as u8,
-                        move_flags: MoveFlags::IS_CAPTURE,
-                    });
-                    break;
-                } else {
-                    break;
-                }
-            }
-        }
-        for (dx, dy) in (repeat(x)).zip((0..y).rev()) {
-            if let Some(piece) = self.get_square(dx, dy) {
-                if piece == Empty {
-                    candidate_moves_buffer.push(Move {
-                        from: (8 * y + x) as u8,
-                        to: (8 * dy + dx) as u8,
-                        move_flags: MoveFlags::empty(),
-                    });
-                } else if piece.is_white() != self.is_white_turn() {
-                    candidate_moves_buffer.push(Move {
-                        from: (8 * y + x) as u8,
-                        to: (8 * dy + dx) as u8,
-                        move_flags: MoveFlags::IS_CAPTURE,
-                    });
-                    break;
-                } else {
-                    break;
-                }
-            }
-        }
+        get_candidates_for_line!(self, x, y, candidate_moves_buffer, (x + 1..8).zip(repeat(y)));
+        get_candidates_for_line!(self, x, y, candidate_moves_buffer, (repeat(x)).zip(y + 1..8));
+        get_candidates_for_line!(self, x, y, candidate_moves_buffer, (0..x).rev().zip(repeat(y)));
+        get_candidates_for_line!(self, x, y, candidate_moves_buffer, (repeat(x)).zip((0..y).rev()));
     }
 
     fn get_bishop_candidate_moves(&self, x: i32, y: i32, candidate_moves_buffer: &mut Vec<Move>) {
-        for (dx, dy) in (x + 1..8).zip(y + 1..8) {
-            if let Some(piece) = self.get_square(dx, dy) {
-                if piece == Empty {
-                    candidate_moves_buffer.push(Move {
-                        from: (8 * y + x) as u8,
-                        to: (8 * dy + dx) as u8,
-                        move_flags: MoveFlags::empty(),
-                    });
-                } else if piece.is_white() != self.is_white_turn() {
-                    candidate_moves_buffer.push(Move {
-                        from: (8 * y + x) as u8,
-                        to: (8 * dy + dx) as u8,
-                        move_flags: MoveFlags::IS_CAPTURE,
-                    });
-                    break;
-                } else {
-                    break;
-                }
-            }
-        }
-        for (dx, dy) in (x + 1..8).zip((0..y).rev()) {
-            if let Some(piece) = self.get_square(dx, dy) {
-                if piece == Empty {
-                    candidate_moves_buffer.push(Move {
-                        from: (8 * y + x) as u8,
-                        to: (8 * dy + dx) as u8,
-                        move_flags: MoveFlags::empty(),
-                    });
-                } else if piece.is_white() != self.is_white_turn() {
-                    candidate_moves_buffer.push(Move {
-                        from: (8 * y + x) as u8,
-                        to: (8 * dy + dx) as u8,
-                        move_flags: MoveFlags::IS_CAPTURE,
-                    });
-                    break;
-                } else {
-                    break;
-                }
-            }
-        }
-        for (dx, dy) in (0..x).rev().zip(y + 1..8) {
-            if let Some(piece) = self.get_square(dx, dy) {
-                if piece == Empty {
-                    candidate_moves_buffer.push(Move {
-                        from: (8 * y + x) as u8,
-                        to: (8 * dy + dx) as u8,
-                        move_flags: MoveFlags::empty(),
-                    });
-                } else if piece.is_white() != self.is_white_turn() {
-                    candidate_moves_buffer.push(Move {
-                        from: (8 * y + x) as u8,
-                        to: (8 * dy + dx) as u8,
-                        move_flags: MoveFlags::IS_CAPTURE,
-                    });
-                    break;
-                } else {
-                    break;
-                }
-            }
-        }
-        for (dx, dy) in (0..x).rev().zip((0..y).rev()) {
-            if let Some(piece) = self.get_square(dx, dy) {
-                if piece == Empty {
-                    candidate_moves_buffer.push(Move {
-                        from: (8 * y + x) as u8,
-                        to: (8 * dy + dx) as u8,
-                        move_flags: MoveFlags::empty(),
-                    });
-                } else if piece.is_white() != self.is_white_turn() {
-                    candidate_moves_buffer.push(Move {
-                        from: (8 * y + x) as u8,
-                        to: (8 * dy + dx) as u8,
-                        move_flags: MoveFlags::IS_CAPTURE,
-                    });
-                    break;
-                } else {
-                    break;
-                }
-            }
-        }
+        
+        get_candidates_for_line!(self, x, y, candidate_moves_buffer, (x + 1..8).zip(y + 1..8));
+        get_candidates_for_line!(self, x, y, candidate_moves_buffer, (x + 1..8).zip((0..y).rev()));
+        get_candidates_for_line!(self, x, y, candidate_moves_buffer, (0..x).rev().zip(y + 1..8));
+        get_candidates_for_line!(self, x, y, candidate_moves_buffer, (0..x).rev().zip((0..y).rev()));
     }
 
     pub fn get_square(&self, x: i32, y: i32) -> Option<Square> {
@@ -924,42 +814,10 @@ impl Position {
             (WhiteRook, WhiteQueen)
         };
 
-        for (dx, dy) in (x + 1..8).zip(repeat(y)) {
-            if self.get_square(dx, dy) == Some(enemy_rook)
-                || self.get_square(dx, dy) == Some(enemy_queen)
-            {
-                return true;
-            } else if self.get_square(dx, dy) != Some(Empty) {
-                break;
-            }
-        }
-        for (dx, dy) in (repeat(x)).zip(y + 1..8) {
-            if self.get_square(dx, dy) == Some(enemy_rook)
-                || self.get_square(dx, dy) == Some(enemy_queen)
-            {
-                return true;
-            } else if self.get_square(dx, dy) != Some(Empty) {
-                break;
-            }
-        }
-        for (dx, dy) in (0..x).rev().zip(repeat(y)) {
-            if self.get_square(dx, dy) == Some(enemy_rook)
-                || self.get_square(dx, dy) == Some(enemy_queen)
-            {
-                return true;
-            } else if self.get_square(dx, dy) != Some(Empty) {
-                break;
-            }
-        }
-        for (dx, dy) in (repeat(x)).zip((0..y).rev()) {
-            if self.get_square(dx, dy) == Some(enemy_rook)
-                || self.get_square(dx, dy) == Some(enemy_queen)
-            {
-                return true;
-            } else if self.get_square(dx, dy) != Some(Empty) {
-                break;
-            }
-        }
+        check_check_line!(self, (x + 1..8).zip(repeat(y)), enemy_rook, enemy_queen);
+        check_check_line!(self, (repeat(x)).zip(y + 1..8), enemy_rook, enemy_queen);
+        check_check_line!(self, (0..x).rev().zip(repeat(y)), enemy_rook, enemy_queen);
+        check_check_line!(self, (repeat(x)).zip((0..y).rev()), enemy_rook, enemy_queen);
 
         false
     }
@@ -971,42 +829,11 @@ impl Position {
             (WhiteBishop, WhiteQueen)
         };
 
-        for (dx, dy) in (x + 1..8).zip(y + 1..8) {
-            if self.get_square(dx, dy) == Some(enemy_bishop)
-                || self.get_square(dx, dy) == Some(enemy_queen)
-            {
-                return true;
-            } else if self.get_square(dx, dy) != Some(Empty) {
-                break;
-            }
-        }
-        for (dx, dy) in (x + 1..8).zip((0..y).rev()) {
-            if self.get_square(dx, dy) == Some(enemy_bishop)
-                || self.get_square(dx, dy) == Some(enemy_queen)
-            {
-                return true;
-            } else if self.get_square(dx, dy) != Some(Empty) {
-                break;
-            }
-        }
-        for (dx, dy) in (0..x).rev().zip(y + 1..8) {
-            if self.get_square(dx, dy) == Some(enemy_bishop)
-                || self.get_square(dx, dy) == Some(enemy_queen)
-            {
-                return true;
-            } else if self.get_square(dx, dy) != Some(Empty) {
-                break;
-            }
-        }
-        for (dx, dy) in (0..x).rev().zip((0..y).rev()) {
-            if self.get_square(dx, dy) == Some(enemy_bishop)
-                || self.get_square(dx, dy) == Some(enemy_queen)
-            {
-                return true;
-            } else if self.get_square(dx, dy) != Some(Empty) {
-                break;
-            }
-        }
+        check_check_line!(self, (x + 1..8).zip(y + 1..8), enemy_bishop, enemy_queen);
+        check_check_line!(self, (x + 1..8).zip((0..y).rev()), enemy_bishop, enemy_queen);
+        check_check_line!(self, (0..x).rev().zip(y + 1..8), enemy_bishop, enemy_queen);
+        check_check_line!(self, (0..x).rev().zip((0..y).rev()), enemy_bishop, enemy_queen);
+
         false
     }
 }
