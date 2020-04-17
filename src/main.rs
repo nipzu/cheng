@@ -12,7 +12,7 @@ fn main() {
 
 fn handle_uci() {
     let mut engine = Engine::new();
-    engine.set_depth(4);
+    engine.set_depth(6);
     loop {
         let mut command = String::new();
         stdin().read_line(&mut command).unwrap();
@@ -22,7 +22,7 @@ fn handle_uci() {
 
         let command_args: Vec<&str> = command.split_whitespace().collect();
 
-        match command_args[0] {
+        match *command_args.get(0).unwrap_or(&"") {
             "uci" => {
                 println!("id name sherlock");
                 println!("id author nipzu");
@@ -74,7 +74,7 @@ fn handle_uci() {
                 );
                 println!("bestmove {}", best_move_or_none);
             }
-            _ => (), //panic!("unknown command {}", command),
+            _ => (),
         }
     }
 }

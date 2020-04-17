@@ -202,11 +202,17 @@ impl Position {
         &self.squares
     }
 
-    pub fn is_priority_move(&self, m: Move) -> bool {
+    pub fn get_move_priority_level(&self, m: Move) -> u8 {
         let from_value = self.squares[m.from as usize].get_value().abs();
         let to_value = self.squares[m.to as usize].get_value().abs();
 
-        to_value - from_value >= -0.01
+        if to_value - from_value >= -0.01 {
+            0
+        } else if m.is_capture() {
+            1
+        } else {
+            2
+        }
     }
 
     pub fn is_insufficient_material(&self) -> bool {
@@ -742,18 +748,59 @@ impl Position {
     fn get_rook_candidate_moves(&self, x: i32, y: i32, candidate_moves_buffer: &mut Vec<Move>) {
         use std::iter::repeat;
 
-        get_candidates_for_line!(self, x, y, candidate_moves_buffer, (x + 1..8).zip(repeat(y)));
-        get_candidates_for_line!(self, x, y, candidate_moves_buffer, (repeat(x)).zip(y + 1..8));
-        get_candidates_for_line!(self, x, y, candidate_moves_buffer, (0..x).rev().zip(repeat(y)));
-        get_candidates_for_line!(self, x, y, candidate_moves_buffer, (repeat(x)).zip((0..y).rev()));
+        get_candidates_for_line!(
+            self,
+            x,
+            y,
+            candidate_moves_buffer,
+            (x + 1..8).zip(repeat(y))
+        );
+        get_candidates_for_line!(
+            self,
+            x,
+            y,
+            candidate_moves_buffer,
+            (repeat(x)).zip(y + 1..8)
+        );
+        get_candidates_for_line!(
+            self,
+            x,
+            y,
+            candidate_moves_buffer,
+            (0..x).rev().zip(repeat(y))
+        );
+        get_candidates_for_line!(
+            self,
+            x,
+            y,
+            candidate_moves_buffer,
+            (repeat(x)).zip((0..y).rev())
+        );
     }
 
     fn get_bishop_candidate_moves(&self, x: i32, y: i32, candidate_moves_buffer: &mut Vec<Move>) {
-        
         get_candidates_for_line!(self, x, y, candidate_moves_buffer, (x + 1..8).zip(y + 1..8));
-        get_candidates_for_line!(self, x, y, candidate_moves_buffer, (x + 1..8).zip((0..y).rev()));
-        get_candidates_for_line!(self, x, y, candidate_moves_buffer, (0..x).rev().zip(y + 1..8));
-        get_candidates_for_line!(self, x, y, candidate_moves_buffer, (0..x).rev().zip((0..y).rev()));
+        get_candidates_for_line!(
+            self,
+            x,
+            y,
+            candidate_moves_buffer,
+            (x + 1..8).zip((0..y).rev())
+        );
+        get_candidates_for_line!(
+            self,
+            x,
+            y,
+            candidate_moves_buffer,
+            (0..x).rev().zip(y + 1..8)
+        );
+        get_candidates_for_line!(
+            self,
+            x,
+            y,
+            candidate_moves_buffer,
+            (0..x).rev().zip((0..y).rev())
+        );
     }
 
     pub fn get_square(&self, x: i32, y: i32) -> Option<Square> {
@@ -830,9 +877,19 @@ impl Position {
         };
 
         check_check_line!(self, (x + 1..8).zip(y + 1..8), enemy_bishop, enemy_queen);
-        check_check_line!(self, (x + 1..8).zip((0..y).rev()), enemy_bishop, enemy_queen);
+        check_check_line!(
+            self,
+            (x + 1..8).zip((0..y).rev()),
+            enemy_bishop,
+            enemy_queen
+        );
         check_check_line!(self, (0..x).rev().zip(y + 1..8), enemy_bishop, enemy_queen);
-        check_check_line!(self, (0..x).rev().zip((0..y).rev()), enemy_bishop, enemy_queen);
+        check_check_line!(
+            self,
+            (0..x).rev().zip((0..y).rev()),
+            enemy_bishop,
+            enemy_queen
+        );
 
         false
     }

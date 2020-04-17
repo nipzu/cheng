@@ -29,7 +29,7 @@ impl fmt::Display for Evaluation {
         match self {
             Evaluation::Heuristic(eval) => write!(f, "cp {}", (eval * 100.0).round() as i32),
             Evaluation::MateIn(dist) => {
-                let half_move_dist = dist - 1 * dist.signum();
+                let half_move_dist = dist - dist.signum();
                 write!(f, "mate {}", half_move_dist / 2 + half_move_dist % 2)
             }
         }
@@ -183,15 +183,17 @@ impl Engine {
         self.game_tree.push(self.game_tree.last().unwrap().clone());
 
         let mut best_move: (Option<Move>, Evaluation) =
-            (None, Evaluation::MateIn(if is_white_turn { -1 } else { 1 }));
+            (None, Evaluation::MateIn(if is_white_turn { -2 } else { 2 }));
 
         let mut did_move = false;
 
-        'outer: for _ in 0..1 {
+        'outer: for level in 0..=3 {
             for m in move_buffer.iter() {
                 *self.game_tree.last_mut().unwrap() =
                     self.game_tree[self.game_tree.len() - 2].clone();
-                if m.is_capture() && self.game_tree.last_mut().unwrap().make_move(*m) {
+                if self.game_tree[self.game_tree.len() - 2].get_move_priority_level(*m) == level
+                    && self.game_tree.last_mut().unwrap().make_move(*m)
+                {
                     did_move = true;
                     if is_white_turn {
                         let (_, eval) = self.min_max_search(
@@ -199,39 +201,7 @@ impl Engine {
                             black_max_eval,
                             best_move.1,
                         );
-                        if eval >= best_move.1 {
-                            best_move = (Some(*m), eval);
-                        }
-                        if eval > black_max_eval {
-                            break 'outer;
-                        }
-                    } else {
-                        let (_, eval) = self.min_max_search(
-                            candidate_moves_buffer,
-                            best_move.1,
-                            white_min_eval,
-                        );
-                        if eval <= best_move.1 {
-                            best_move = (Some(*m), eval);
-                        }
-                        if eval < white_min_eval {
-                            break 'outer;
-                        }
-                    }
-                }
-            }
 
-            for m in move_buffer.iter() {
-                *self.game_tree.last_mut().unwrap() =
-                    self.game_tree[self.game_tree.len() - 2].clone();
-                if !m.is_capture() && self.game_tree.last_mut().unwrap().make_move(*m) {
-                    did_move = true;
-                    if is_white_turn {
-                        let (_, eval) = self.min_max_search(
-                            candidate_moves_buffer,
-                            black_max_eval,
-                            best_move.1,
-                        );
                         if eval >= best_move.1 {
                             best_move = (Some(*m), eval);
                         }
@@ -275,19 +245,9 @@ impl Engine {
 
         for (i, piece) in position.iter().enumerate() {
             material_score += match piece {
-                Empty => 0.0,
                 WhitePawn => 1.0 + (i / 8 - 1) as f64 / 80.0,
                 BlackPawn => -1.0 - (7 - i / 8) as f64 / 80.0,
-                WhiteKnight => 3.0,
-                BlackKnight => -3.0,
-                WhiteBishop => 3.0,
-                BlackBishop => -3.0,
-                WhiteRook => 5.0,
-                BlackRook => -5.0,
-                WhiteKing => 0.0,
-                BlackKing => 0.0,
-                WhiteQueen => 9.0,
-                BlackQueen => -9.0,
+                _ => piece.get_value(),
             }
         }
         Evaluation::Heuristic(material_score)
