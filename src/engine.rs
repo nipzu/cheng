@@ -87,43 +87,31 @@ pub async fn search_game_tree(game_tree: Vec<Position>, depth: usize) -> SearchO
         .filter(|m| game_tree.last().unwrap().clone().make_move(*m))
         .collect();
 
-    let mut candidate_moves_buffer = Vec::with_capacity(depth);
-    for _ in 0..depth {
-        candidate_moves_buffer.push(Vec::with_capacity(256));
-    }
-
     let start_time = Instant::now();
 
     let mut tasks = Vec::new();
 
-    let mut game_tree_cloned = game_tree.to_vec();
     let search_to_move = game_tree.len() - 1 + depth;
-    /*for m in moves_to_evaluate {
-        let mut buffer_cloned = candidate_moves_buffer.clone();
+
+    for m in moves_to_evaluate {
+        let mut game_tree_cloned = game_tree.to_vec();
+        let mut candidate_moves_buffer = Vec::with_capacity(depth);
+        for _ in 0..depth {
+            candidate_moves_buffer.push(Vec::with_capacity(256));
+        }
         let mut next_position = game_tree.last().unwrap().clone();
         next_position.make_move(m);
         game_tree_cloned.push(next_position);
-        buffer_cloned.push(Vec::new());
-        tasks.push(task::spawn_blocking(move || {
+        tasks.push(task::spawn_blocking(move || {(
             min_max_search(
                 &mut game_tree_cloned,
-                &mut buffer_cloned,
+                &mut candidate_moves_buffer,
                 search_to_move,
                 Evaluation::MateIn(1),
                 Evaluation::MateIn(-1),
             )
-        }));
-    }*/
-
-    tasks.push(task::spawn_blocking(move || {
-        min_max_search(
-            &mut game_tree_cloned,
-            &mut candidate_moves_buffer,
-            search_to_move,
-            Evaluation::MateIn(1),
-            Evaluation::MateIn(-1),
-        )
-    }));
+        ,m)}));
+    }
 
     let (mut best_move, mut evaluation) = (
         None,
@@ -135,27 +123,37 @@ pub async fn search_game_tree(game_tree: Vec<Position>, depth: usize) -> SearchO
     );
 
     for t in tasks {
-        let (best_move_candidate, eval, new_nodes_searched) = t.await;
+        let ((_, eval, new_nodes_searched), best_move_candidate) = t.await;
         nodes_searched += new_nodes_searched;
         if game_tree.last().unwrap().is_white_turn() {
-            if eval > evaluation {
-                best_move = best_move_candidate;
+            if eval >= evaluation {
+                best_move = Some(best_move_candidate);
                 evaluation = eval;
             }
         } else {
-            if eval < evaluation {
-                best_move = best_move_candidate;
+            if eval <= evaluation {
+                best_move = Some(best_move_candidate);
                 evaluation = eval;
             }
         }
-    }
 
-    let end_time = Instant::now();
+        let end_time = Instant::now();
+        let search_time = end_time - start_time;
+        let out = SearchOutput {
+            best_move,
+            nodes_searched,
+            search_depth: depth,
+            evaluation,
+            search_time,
+        };
+        println!("{}", out);
+    }
 
     if !game_tree.last().unwrap().is_white_turn() {
         evaluation = -evaluation;
     }
 
+    let end_time = Instant::now();
     let search_time = end_time - start_time;
     SearchOutput {
         best_move,
@@ -318,7 +316,7 @@ impl fmt::Display for SearchOutput {
         };
 
         let nps = (nodes_searched as f64 / search_time.as_secs_f64()) as usize;
-        writeln!(
+        write!(
             f,
             "info depth {} nodes {} nps {} time {} score {} pv {}",
             search_depth,
@@ -327,7 +325,6 @@ impl fmt::Display for SearchOutput {
             search_time.as_millis(),
             evaluation,
             best_move_or_none
-        )?;
-        write!(f, "bestmove {}", best_move_or_none)
+        )
     }
 }

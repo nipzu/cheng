@@ -35,6 +35,12 @@ async fn run_engine() {
                 line = a => command = line.unwrap(),
                 search_output = search_handle => {
                     println!("{}", search_output);
+                    let best_move_or_none = if let Some(m) = search_output.best_move {
+                        format!("{}", m)
+                    }else {
+                        String::from("(none)")
+                    };
+                    println!("bestmove {}", best_move_or_none);
                     is_searching = false;
                     command = a.await.unwrap();
                 },
