@@ -3,6 +3,9 @@ use std::time::{Duration, Instant};
 
 use crate::position::{Move, Position, Square, Square::*};
 
+use async_std::task;
+
+#[derive(Clone)]
 pub struct Engine {
     game_tree: Vec<Position>,
     nodes_searched: usize,
@@ -71,191 +74,260 @@ pub struct SearchOutput {
     pub evaluation: Evaluation,
 }
 
-impl Engine {
-    pub fn new() -> Engine {
-        Engine {
-            game_tree: vec![Position::new()],
-            depth: 0,
-            nodes_searched: 0,
-            root_node: 0,
-        }
+pub async fn search_game_tree(game_tree: Vec<Position>, depth: usize) -> SearchOutput {
+    let mut nodes_searched = 0;
+
+    let mut moves_to_evaluate = Vec::new();
+    game_tree
+        .last()
+        .unwrap()
+        .get_candidate_moves(&mut moves_to_evaluate);
+    moves_to_evaluate = moves_to_evaluate
+        .into_iter()
+        .filter(|m| game_tree.last().unwrap().clone().make_move(*m))
+        .collect();
+
+    let mut candidate_moves_buffer = Vec::with_capacity(depth);
+    for _ in 0..depth {
+        candidate_moves_buffer.push(Vec::with_capacity(256));
     }
 
-    pub fn set_depth(&mut self, new_depth: usize) {
-        self.depth = new_depth;
-    }
+    let start_time = Instant::now();
 
-    pub fn set_game_tree(&mut self, move_iter: &mut dyn Iterator<Item = Move>) {
-        self.game_tree = vec![Position::new()];
-        for next_move in move_iter {
-            let mut next_position = self.game_tree.last().unwrap().clone();
-            next_position.make_move(next_move);
-            self.game_tree.push(next_position);
-        }
-        self.root_node = self.game_tree.len() - 1;
-    }
+    let mut tasks = Vec::new();
 
-    pub fn is_root_white_turn(&self) -> bool {
-        self.game_tree[self.root_node].is_white_turn()
-    }
+    let mut game_tree_cloned = game_tree.to_vec();
+    let search_to_move = game_tree.len() - 1 + depth;
+    /*for m in moves_to_evaluate {
+        let mut buffer_cloned = candidate_moves_buffer.clone();
+        let mut next_position = game_tree.last().unwrap().clone();
+        next_position.make_move(m);
+        game_tree_cloned.push(next_position);
+        buffer_cloned.push(Vec::new());
+        tasks.push(task::spawn_blocking(move || {
+            min_max_search(
+                &mut game_tree_cloned,
+                &mut buffer_cloned,
+                search_to_move,
+                Evaluation::MateIn(1),
+                Evaluation::MateIn(-1),
+            )
+        }));
+    }*/
 
-    pub fn search_game_tree(&mut self) -> SearchOutput {
-        self.nodes_searched = 0;
-
-        let mut candidate_moves_buffer = Vec::with_capacity(self.depth);
-        for _ in 0..self.depth {
-            candidate_moves_buffer.push(Vec::with_capacity(256));
-        }
-
-        let start_time = Instant::now();
-        let (best_move, evaluation) = self.min_max_search(
+    tasks.push(task::spawn_blocking(move || {
+        min_max_search(
+            &mut game_tree_cloned,
             &mut candidate_moves_buffer,
+            search_to_move,
             Evaluation::MateIn(1),
             Evaluation::MateIn(-1),
-        );
-        let end_time = Instant::now();
+        )
+    }));
 
-        let search_time = end_time - start_time;
-        SearchOutput {
-            best_move,
-            nodes_searched: self.nodes_searched,
-            search_depth: self.depth,
-            evaluation,
-            search_time,
+    let (mut best_move, mut evaluation) = (
+        None,
+        Evaluation::MateIn(if game_tree.last().unwrap().is_white_turn() {
+            -2
+        } else {
+            2
+        }),
+    );
+
+    for t in tasks {
+        let (best_move_candidate, eval, new_nodes_searched) = t.await;
+        nodes_searched += new_nodes_searched;
+        if game_tree.last().unwrap().is_white_turn() {
+            if eval > evaluation {
+                best_move = best_move_candidate;
+                evaluation = eval;
+            }
+        } else {
+            if eval < evaluation {
+                best_move = best_move_candidate;
+                evaluation = eval;
+            }
         }
     }
 
-    fn min_max_search(
-        &mut self,
-        candidate_moves_buffer: &mut [Vec<Move>],
-        black_max_eval: Evaluation,
-        white_min_eval: Evaluation,
-    ) -> (Option<Move>, Evaluation) {
-        self.nodes_searched += 1;
+    let end_time = Instant::now();
 
-        let cur_depth = self.game_tree.len() - self.root_node - 1;
+    if !game_tree.last().unwrap().is_white_turn() {
+        evaluation = -evaluation;
+    }
 
-        assert!(cur_depth <= self.depth);
+    let search_time = end_time - start_time;
+    SearchOutput {
+        best_move,
+        nodes_searched,
+        search_depth: depth,
+        evaluation,
+        search_time,
+    }
+}
 
-        let is_white_turn = self.game_tree.last().unwrap().is_white_turn();
+fn min_max_search(
+    game_tree: &mut Vec<Position>,
+    candidate_moves_buffer: &mut [Vec<Move>],
+    search_to_move: usize,
+    black_max_eval: Evaluation,
+    white_min_eval: Evaluation,
+) -> (Option<Move>, Evaluation, usize) {
+    let is_white_turn = game_tree.last().unwrap().is_white_turn();
 
-        if cur_depth == self.depth {
-            return (
-                None,
-                Self::heuristic_evaluation(self.game_tree.last().unwrap().get_squares()),
-            );
+    if game_tree.len() - 1 == search_to_move {
+        return (
+            None,
+            heuristic_evaluation(game_tree.last().unwrap().get_squares()),
+            1,
+        );
+    }
+
+    let mut num_same_boards = 1;
+    for i in game_tree
+        .iter()
+        .enumerate()
+        .rev()
+        .take_while(|(_, pos)| !pos.resets_draw_counters())
+        .map(|(i, _)| i)
+    {
+        if game_tree[i - 1] == *game_tree.last().unwrap() {
+            num_same_boards += 1;
         }
-
-        let mut num_same_boards = 1;
-        for i in self
-            .game_tree
-            .iter()
-            .enumerate()
-            .rev()
-            .take_while(|(_, pos)| !pos.resets_draw_counters())
-            .map(|(i, _)| i)
-        {
-            if self.game_tree[i - 1] == *self.game_tree.last().unwrap() {
-                num_same_boards += 1;
-            }
-            if self.game_tree.len() - i >= 100 {
-                return (None, Evaluation::Heuristic(0.0));
-            }
-            // cant be reached more than once
-            if num_same_boards >= 3 && !self.game_tree[i - 1].can_en_passant() {
-                return (None, Evaluation::Heuristic(0.0));
-            }
+        if game_tree.len() - i >= 100 {
+            return (None, Evaluation::Heuristic(0.0), 1);
         }
-
-        if self.game_tree.last().unwrap().is_insufficient_material() {
-            return (None, Evaluation::Heuristic(0.0));
+        // cant be reached more than once
+        if num_same_boards >= 3 && !game_tree[i - 1].can_en_passant() {
+            return (None, Evaluation::Heuristic(0.0), 1);
         }
+    }
 
-        candidate_moves_buffer[0].clear();
-        self.game_tree
-            .last()
-            .unwrap()
-            .get_candidate_moves(&mut candidate_moves_buffer[0]);
+    if game_tree.last().unwrap().is_insufficient_material() {
+        return (None, Evaluation::Heuristic(0.0), 1);
+    }
 
-        let (move_buffer, candidate_moves_buffer) =
-            candidate_moves_buffer.split_first_mut().unwrap();
+    candidate_moves_buffer[0].clear();
+    game_tree
+        .last()
+        .unwrap()
+        .get_candidate_moves(&mut candidate_moves_buffer[0]);
 
-        self.game_tree.push(self.game_tree.last().unwrap().clone());
+    let (move_buffer, candidate_moves_buffer) = candidate_moves_buffer.split_first_mut().unwrap();
 
-        let mut best_move: (Option<Move>, Evaluation) =
-            (None, Evaluation::MateIn(if is_white_turn { -2 } else { 2 }));
+    game_tree.push(game_tree.last().unwrap().clone());
 
-        let mut did_move = false;
+    let mut best_move: (Option<Move>, Evaluation, usize) = (
+        None,
+        Evaluation::MateIn(if is_white_turn { -2 } else { 2 }),
+        1,
+    );
 
-        'outer: for level in 0..=3 {
-            for m in move_buffer.iter() {
-                *self.game_tree.last_mut().unwrap() =
-                    self.game_tree[self.game_tree.len() - 2].clone();
-                if self.game_tree[self.game_tree.len() - 2].get_move_priority_level(*m) == level
-                    && self.game_tree.last_mut().unwrap().make_move(*m)
-                {
-                    did_move = true;
-                    if is_white_turn {
-                        let (_, eval) = self.min_max_search(
-                            candidate_moves_buffer,
-                            black_max_eval,
-                            best_move.1,
-                        );
+    let mut did_move = false;
 
-                        if eval >= best_move.1 {
-                            best_move = (Some(*m), eval);
-                        }
-                        if eval > black_max_eval {
-                            break 'outer;
-                        }
-                    } else {
-                        let (_, eval) = self.min_max_search(
-                            candidate_moves_buffer,
-                            best_move.1,
-                            white_min_eval,
-                        );
-                        if eval <= best_move.1 {
-                            best_move = (Some(*m), eval);
-                        }
-                        if eval < white_min_eval {
-                            break 'outer;
-                        }
+    'outer: for level in 0..=3 {
+        for m in move_buffer.iter() {
+            *game_tree.last_mut().unwrap() = game_tree[game_tree.len() - 2].clone();
+            if game_tree[game_tree.len() - 2].get_move_priority_level(*m) == level
+                && game_tree.last_mut().unwrap().make_move(*m)
+            {
+                did_move = true;
+                if is_white_turn {
+                    let (_, eval, new_nodes) = min_max_search(
+                        game_tree,
+                        candidate_moves_buffer,
+                        search_to_move,
+                        black_max_eval,
+                        best_move.1,
+                    );
+
+                    if eval >= best_move.1 {
+                        best_move.0 = Some(*m);
+                        best_move.1 = eval;
+                    }
+                    best_move.2 += new_nodes;
+                    if eval > black_max_eval {
+                        break 'outer;
+                    }
+                } else {
+                    let (_, eval, new_nodes) = min_max_search(
+                        game_tree,
+                        candidate_moves_buffer,
+                        search_to_move,
+                        best_move.1,
+                        white_min_eval,
+                    );
+                    if eval <= best_move.1 {
+                        best_move.0 = Some(*m);
+                        best_move.1 = eval;
+                    }
+                    best_move.2 += new_nodes;
+                    if eval < white_min_eval {
+                        break 'outer;
                     }
                 }
             }
         }
-
-        self.game_tree.pop();
-
-        best_move.1.increase_mate_dist();
-
-        if !did_move {
-            return if self.game_tree.last().unwrap().is_check() {
-                (None, Evaluation::MateIn(if is_white_turn { -1 } else { 1 }))
-            } else {
-                (None, Evaluation::Heuristic(0.0))
-            };
-        }
-
-        best_move
     }
 
-    fn heuristic_evaluation(position: &[Square; 64]) -> Evaluation {
-        let mut material_score = 0.0;
+    game_tree.pop();
 
-        for (i, piece) in position.iter().enumerate() {
-            material_score += match piece {
-                WhitePawn => 1.0 + (i / 8 - 1) as f64 / 80.0,
-                BlackPawn => -1.0 - (7 - i / 8) as f64 / 80.0,
-                _ => piece.get_value(),
-            }
-        }
-        Evaluation::Heuristic(material_score)
+    best_move.1.increase_mate_dist();
+
+    if !did_move {
+        return if game_tree.last().unwrap().is_check() {
+            (
+                None,
+                Evaluation::MateIn(if is_white_turn { -1 } else { 1 }),
+                1,
+            )
+        } else {
+            (None, Evaluation::Heuristic(0.0), 1)
+        };
     }
+
+    best_move
 }
 
-impl fmt::Debug for Engine {
+fn heuristic_evaluation(position: &[Square; 64]) -> Evaluation {
+    let mut material_score = 0.0;
+
+    for (i, piece) in position.iter().enumerate() {
+        material_score += match piece {
+            WhitePawn => 1.0 + (i / 8 - 1) as f64 / 80.0,
+            BlackPawn => -1.0 - (7 - i / 8) as f64 / 80.0,
+            _ => piece.get_value(),
+        }
+    }
+    Evaluation::Heuristic(material_score)
+}
+
+impl fmt::Display for SearchOutput {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        writeln!(f, "{:?}", self.game_tree[self.root_node])
+        let SearchOutput {
+            best_move,
+            search_time,
+            nodes_searched,
+            search_depth,
+            evaluation,
+        } = *self;
+        let best_move_or_none = if let Some(m) = best_move {
+            format!("{}", m)
+        } else {
+            String::from("(none)")
+        };
+
+        let nps = (nodes_searched as f64 / search_time.as_secs_f64()) as usize;
+        writeln!(
+            f,
+            "info depth {} nodes {} nps {} time {} score {} pv {}",
+            search_depth,
+            nodes_searched,
+            nps,
+            search_time.as_millis(),
+            evaluation,
+            best_move_or_none
+        )?;
+        write!(f, "bestmove {}", best_move_or_none)
     }
 }

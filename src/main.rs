@@ -1,25 +1,51 @@
-use std::io::stdin;
+use async_std::io::stdin;
+use async_std::task;
+use futures::future::FutureExt;
+use futures::{pin_mut, select};
 
 mod engine;
 mod position;
 
-use engine::{Engine, SearchOutput};
-use position::Move;
+use engine::{search_game_tree, Evaluation, SearchOutput};
+use position::{Move, Position};
 
 fn main() {
-    handle_uci();
+    task::block_on(run_engine());
 }
 
-fn handle_uci() {
-    let mut engine = Engine::new();
-    engine.set_depth(6);
+async fn read_line() -> Result<String, std::io::Error> {
+    let mut line = String::new();
+    stdin().read_line(&mut line).await?;
+    Ok(line)
+}
+
+async fn run_engine() {
+    let depth = 6;
+    let mut game_tree = vec![Position::new()];
+    let mut search_handle = task::spawn(dummy_search()).fuse();
+    let mut is_searching = false;
+    let mut command;
+
     loop {
-        let mut command = String::new();
-        stdin().read_line(&mut command).unwrap();
+        let a = read_line().fuse();
+        pin_mut!(a);
+
+        if is_searching {
+            select! {
+                line = a => command = line.unwrap(),
+                search_output = search_handle => {
+                    println!("{}", search_output);
+                    is_searching = false;
+                    command = a.await.unwrap();
+                },
+            }
+        } else {
+            command = read_line().await.unwrap();
+        }
+
         while command.ends_with('\n') || command.ends_with('\r') {
             command.pop();
         }
-
         let command_args: Vec<&str> = command.split_whitespace().collect();
 
         match *command_args.get(0).unwrap_or(&"") {
@@ -29,52 +55,44 @@ fn handle_uci() {
                 println!("uciok");
             }
             "isready" => println!("readyok"),
-            "ucinewgame" => engine.set_game_tree(&mut std::iter::empty()),
+            "ucinewgame" => game_tree = vec![Position::new()],
             "position" => {
-                if command_args[1] != "startpos" {
+                if command_args.get(1) != Some(&"startpos") {
                     panic!("no startpos after position")
                 }
                 if command_args.get(2) == Some(&"moves") {
-                    engine.set_game_tree(
-                        &mut command_args.iter().skip(3).map(|n| Move::from_notation(n)),
-                    );
+                    game_tree = vec![Position::new()];
+                    for m in command_args.iter().skip(3) {
+                        let mut next_position = game_tree.last().unwrap().clone();
+                        next_position.make_move(Move::from_notation(m));
+                        game_tree.push(next_position);
+                    }
                 }
             }
             "quit" => return,
             "debug" => {
-                println!("{:?}", engine);
+                unimplemented!();
+            }
+            "stop" => {
+                // TODO is_searching = false;
+                unimplemented!();
             }
             "go" => {
-                let SearchOutput {
-                    best_move,
-                    search_time,
-                    nodes_searched,
-                    search_depth,
-                    evaluation,
-                } = engine.search_game_tree();
-                let best_move_or_none = if let Some(m) = best_move {
-                    format!("{}", m)
-                } else {
-                    String::from("(none)")
-                };
-                let nps = (nodes_searched as f64 / search_time.as_secs_f64()) as usize;
-                let real_evaluation = if engine.is_root_white_turn() {
-                    evaluation
-                } else {
-                    -evaluation
-                };
-                println!(
-                    "info depth {} nodes {} nps {} time {} score {} pv {}",
-                    search_depth,
-                    nodes_searched,
-                    nps,
-                    search_time.as_millis(),
-                    real_evaluation,
-                    best_move_or_none
-                );
-                println!("bestmove {}", best_move_or_none);
+                let game_tree_cloned = game_tree.clone();
+                search_handle = task::spawn(search_game_tree(game_tree_cloned, depth)).fuse();
+                is_searching = true;
             }
             _ => (),
         }
+    }
+}
+
+async fn dummy_search() -> SearchOutput {
+    SearchOutput {
+        best_move: None,
+        evaluation: Evaluation::MateIn(0),
+        nodes_searched: 0,
+        search_time: std::time::Duration::from_secs(0),
+        search_depth: 0,
     }
 }
